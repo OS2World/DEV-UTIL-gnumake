@@ -1,0 +1,119 @@
+#
+#	Makefile for GNU Make
+#
+
+# srcdir = .
+# VPATH = .
+
+os2:
+	$(MAKE) -f Makefile.emx all \
+	CC="gcc -O -Zomf" O=".obj" LDFLAGS="-s -Zsys -Zstack 512"
+win32:
+	$(MAKE) -f Makefile.emx all \
+	CC="gcc -O -Zwin32" O=".o" LDFLAGS="-s -Zsys -Zstack 512"
+dos:
+	$(MAKE) -f Makefile.emx all \
+	CC="gcc -O" O=".o" LDFLAGS="-s -Zsmall-conv"
+debug:
+	$(MAKE) -f Makefile.emx all \
+	CC="gcc -g" O=".o"
+
+CFLAGS = -DHAVE_CONFIG_H
+
+# If you are using the GNU C library, or have the GNU getopt functions in
+# your C library, you can comment these out.
+GETOPT = getopt$O getopt1$O
+GETOPT_SRC = $(srcdir)/getopt.c $(srcdir)/getopt1.c $(srcdir)/getopt.h
+
+# If you are using the GNU C library, or have the GNU glob functions in
+# your C library, you can comment this out.  GNU make uses special hooks
+# into the glob functions to be more efficient (by using make's directory
+# cache for globbing), so you must use the GNU functions even if your
+# system's C library has the 1003.2 glob functions already.  Also, the glob
+# functions in the AIX and HPUX C libraries are said to be buggy.
+GLOB = glob$O fnmatch$O
+
+# If your system doesn't have alloca, or the one provided is bad, define this.
+ALLOCA = 
+ALLOCA_SRC = 
+
+# If your system needs extra libraries loaded in, define them here.
+# System V probably need -lPW for alloca.  HP-UX 7.0's alloca in
+# libPW.a is broken on HP9000s300 and HP9000s400 machines.  Use
+# alloca.c instead on those machines.
+LOADLIBES = 
+
+# If there are remote execution facilities defined,
+# enable them with switches here (see remote-*.c).
+REMOTE = stub
+
+# Any extra object files your system needs.
+extras = 
+
+# Whether or not make needs to be installed setgid.
+# The value should be either `true' or `false'.
+# On many systems, the getloadavg function (used to implement the `-l'
+# switch) will not work unless make is installed setgid kmem.
+
+objs = commands$O job$O dir$O file$O misc$O main$O read$O remake$O	\
+       remote$O rule$O implicit$O default$O variable$O expand$O		\
+       function$O vpath$O version$O ar$O arscan$O signame$O		\
+       getloadavg$O $(GLOB) $(GETOPT) $(ALLOCA) $(extras)
+
+.PHONY: all
+all: make.exe
+
+make.exe : $(objs)
+	$(CC) $(LDFLAGS) $(objs) $(LOADLIBES) -o $@
+
+
+# -I. is needed to find config.h in the build directory.
+%$O: %.c
+	$(CC) -c -I. -Iglob $(CFLAGS) $< -o $@
+remote$O: remote-$(REMOTE).c
+	$(CC) -c -I. -Iglob $(CFLAGS) remote-$(REMOTE).c -o $@
+glob$O: glob/glob.c
+	$(CC) -c -I. -Iglob $(CFLAGS) glob/glob.c -o $@
+fnmatch$O: glob/fnmatch.c
+	$(CC) -c -I. -Iglob $(CFLAGS) glob/fnmatch.c -o $@
+
+# For some losing Unix makes.
+# MAKE = make
+
+config.h: config.h.emx
+	copy config.h.emx $@
+
+# This tells versions [3.59,3.63) of GNU make not to export all variables.
+.NOEXPORT:
+
+# Automatically generated dependencies will be put at the end of the file.
+
+# Automatically generated dependencies.
+commands$O : commands.c make.h config.h dep.h commands.h variable.h \
+  job.h 
+job$O : job.c make.h config.h commands.h job.h variable.h 
+dir$O : dir.c make.h config.h 
+file$O : file.c make.h config.h commands.h dep.h variable.h 
+misc$O : misc.c make.h config.h dep.h 
+main$O : main.c make.h config.h commands.h dep.h variable.h job.h \
+  getopt.h 
+read$O : read.c make.h config.h commands.h dep.h variable.h glob/glob.h 
+remake$O : remake.c make.h config.h commands.h job.h dep.h 
+remote$O : remote-$(REMOTE).c make.h commands.h 
+rule$O : rule.c make.h commands.h dep.h variable.h rule.h 
+implicit$O : implicit.c make.h config.h rule.h dep.h 
+default$O : default.c make.h config.h rule.h dep.h commands.h variable.h 
+variable$O : variable.c make.h config.h commands.h variable.h dep.h 
+expand$O : expand.c make.h config.h commands.h variable.h 
+function$O : function.c make.h config.h variable.h dep.h commands.h job.h 
+vpath$O : vpath.c make.h config.h variable.h 
+version$O : version.c 
+ar$O : ar.c make.h 
+arscan$O : arscan.c make.h config.h 
+signame$O : signame.c signame.h 
+getopt$O : getopt.c config.h getopt.h 
+getopt1$O : getopt1.c config.h getopt.h 
+getloadavg$O : getloadavg.c config.h 
+
+clean:
+	-del *.o *.obj core config.h

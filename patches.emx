@@ -1,0 +1,1367 @@
+Only in .: README.EMX
+Only in .: config.h.emx
+Only in .: Makefile.emx
+Only in .: patches.emx
+diff -cbr orig/commands.c ./commands.c
+*** orig/commands.c	Fri Jun 30 20:36:52 2000
+--- ./commands.c	Fri Apr 24 20:37:48 1998
+***************
+*** 430,437 ****
+--- 430,445 ----
+  
+        /* Clean up the children.  We don't just use the call below because
+  	 we don't want to print the "Waiting for children" message.  */
++ 
++ #ifndef __EMX__
++       /* Under emx, when make is aborted by the user, it seems to happen 
++ 	 that childs are already terminated as well, without the parent
++ 	 being notified. To avoid an endless loop, we simply don't do 
++ 	 that. In most cases, the OS/2 command line interpreter waits
++ 	 for any childs anyway. */
+        while (job_slots_used > 0)
+  	reap_children (1, 0);
++ #endif
+      }
+    else
+      /* Wait for our children to die.  */
+***************
+*** 447,452 ****
+--- 455,464 ----
+      /* We don't want to send ourselves SIGQUIT, because it will
+         cause a core dump.  Just exit instead.  */
+      exit (EXIT_FAILURE);
++ #endif
++ 
++ #ifdef __EMX__
++   exit (EXIT_FAILURE);
+  #endif
+  
+    /* Signal the same code; this time it will really be fatal.  The signal
+diff -cbr orig/dir.c ./dir.c
+*** orig/dir.c	Fri Jun 30 20:36:52 2000
+--- ./dir.c	Fri Apr 24 20:37:50 1998
+***************
+*** 338,343 ****
+--- 338,349 ----
+  
+  	  struct directory_contents *dc;
+  
++ #ifdef __EMX__
++ 	  static unsigned short dummy;
++ 	  st.st_dev = ++dummy;
++ 	  st.st_ino = ++dummy;
++ #endif
++ 
+  #ifdef WINDOWS32
+            w32_path = w32ify(name, 1);
+            hash = ((unsigned int) st.st_dev << 16) | (unsigned int) st.st_ctime;
+diff -cbr orig/function.c ./function.c
+*** orig/function.c	Fri Jun 30 20:36:52 2000
+--- ./function.c	Fri Apr 24 21:08:10 1998
+***************
+*** 511,523 ****
+  	    break;
+  	  }
+  
+! #  ifndef  __MSDOS__
+  	pid = vfork ();
+  	if (pid < 0)
+  	  perror_with_name (error_prefix, "fork");
+  	else if (pid == 0)
+  	  child_execute_job (0, pipedes[1], argv, envp);
+  	else
+  #  endif /* ! __MSDOS__ */
+  # endif /* WINDOWS32 */
+  	  {
+--- 511,527 ----
+  	    break;
+  	  }
+  
+! #  if !defined(__EMX__) && !defined(__MSDOS__)
+  	pid = vfork ();
+  	if (pid < 0)
+  	  perror_with_name (error_prefix, "fork");
+  	else if (pid == 0)
+  	  child_execute_job (0, pipedes[1], argv, envp);
+  	else
++ #  else
++ 	  if((pid = child_execute_job(0,pipedes[1], argv, environ)) < 0) {
++ 	    perror_with_name (error_prefix, "spawn");
++ 	  }
+  #  endif /* ! __MSDOS__ */
+  # endif /* WINDOWS32 */
+  	  {
+diff -cbr orig/job.c ./job.c
+*** orig/job.c	Fri Jun 30 20:36:52 2000
+--- ./job.c	Fri Jun 30 20:32:50 2000
+***************
+*** 23,29 ****
+--- 23,36 ----
+  #include "variable.h"
+  #include <assert.h>
+  
++ #ifdef HAVE_FCNTL_H
++ #include <fcntl.h>
++ #endif
++ 
+  /* Default shell to use.  */
++ #ifdef __EMX__
++ char default_shell[] = "cmd.exe";
++ #else
+  #ifdef WINDOWS32
+  char *default_shell = "sh.exe";
+  int no_default_sh_exe = 1;
+***************
+*** 43,48 ****
+--- 50,65 ----
+  #endif /* __MSDOS__ */
+  #endif /* _AMIGA */
+  #endif /* WINDOWS32 */
++ #endif
++ 
++ #ifdef __EMX__
++ #include <process.h>
++ #define INCL_NOPM
++ #define INCL_REXXSAA
++ #include <os2.h>
++ static int wait_rexx (int *);
++ const char REXX_KEYWORD[] = "rexx";
++ #endif
+  
+  #ifdef __MSDOS__
+  #include <process.h>
+***************
+*** 361,366 ****
+--- 378,386 ----
+  	      vmsWaitForChildren (&status);
+  	      pid = c->pid;
+  #else
++ #ifdef __EMX__
++ 	      if ((pid = wait_rexx (&status)) == 0)
++ #endif
+  #ifdef WAIT_NOHANG
+  	      if (!block)
+  		pid = WAIT_NOHANG (&status);
+***************
+*** 910,915 ****
+--- 930,950 ----
+  
+        child->remote = 0;
+  
++ #ifdef __EMX__
++       child->pid = child_execute_job(child->good_stdin ? 0 : bad_stdin, 1,
++ 				     argv, child->environment);
++       /* if we've opened a pipe for the stdin of this command,
++        * close it after the spawn, since we don't exec and let
++        * the child handles croak of their own free will.
++        */
++       if(!child->good_stdin)
++ 	close(bad_stdin);
++       if(child->pid < 0) {
++ 	unblock_sigs();
++ 	goto error;
++       }
++ #else
++ 
+  #ifdef VMS
+  
+        if (!child_execute_job (argv, child)) {
+***************
+*** 938,943 ****
+--- 973,979 ----
+  	  goto error;
+  	}
+  #endif /* !VMS */
++ #endif
+      }
+  
+  #else	/* __MSDOS__ or Amiga or WINDOWS32 */
+***************
+*** 1042,1047 ****
+--- 1078,1087 ----
+  
+    /* Free the storage used by the child's argument list.  */
+  #ifndef VMS
++ #ifdef __EMX__
++   /* 24.5.2000 Petr Mikulik: avoid message "Abnormal program termination" */
++   if (_osmode == OS2_MODE && !strstr(argv[0],".cmd"))
++ #endif
+    free (argv[0]);
+    free ((char *) argv);
+  #endif
+***************
+*** 1049,1055 ****
+--- 1089,1099 ----
+    return;
+  
+   error:
++ #ifdef __EMX__
++   child->file->update_status = 1;
++ #else
+    child->file->update_status = 2;
++ #endif
+    notice_finished_file (child->file);
+    return;
+  }
+***************
+*** 1570,1580 ****
+--- 1614,1634 ----
+     STDIN_FD and STDOUT_FD are used as the process's stdin and stdout; ENVP is
+     the environment of the new program.  This function does not return.  */
+  
++ #ifdef __EMX__
++ int
++ #else
+  void
++ #endif
+  child_execute_job (stdin_fd, stdout_fd, argv, envp)
+       int stdin_fd, stdout_fd;
+       char **argv, **envp;
+  {
++ #ifdef __EMX__
++   int oldstdin = dup(0), oldstdout = dup(1), rval;
++   fcntl(oldstdin, F_SETFD, 1);
++   fcntl(oldstdout, F_SETFD, 1);
++ #endif
++ 
+    if (stdin_fd != 0)
+      (void) dup2 (stdin_fd, 0);
+    if (stdout_fd != 1)
+***************
+*** 1584,1604 ****
+--- 1638,1823 ----
+    if (stdout_fd != 1)
+      (void) close (stdout_fd);
+  
++ #ifdef __EMX__
++   /* Run the command.  */
++   rval = exec_command (argv, envp);
++ 
++   dup2(oldstdin,0);
++   dup2(oldstdout,1);
++   close(oldstdin);
++   close(oldstdout);
++ 
++   return rval;
++ #else
+    /* Run the command.  */
+    exec_command (argv, envp);
++ #endif
+  }
+  #endif /* !AMIGA && !__MSDOS__ */
+  #endif /* !VMS */
++ #endif /* !WIN32 */
++ 
++ /* Return one if the file is an internal SHELL command
++    Return zero otherwise
++  */
++ static int
++ is_shell_command(char* str)
++ {
++   register int j;
++ #ifdef __EMX__
++   static char *sh_cmds[] = { "call", "cd", "chcp", "chdir", "cls", "copy",
++ 			     "date", "del", "detach", "dir", "echo",
++ 			     "endlocal", "erase", "exit", "for", "goto", "if",
++ 			     "keys", "md", "mkdir", "move", "path", "pause",
++ 			     "prompt", "rd", "rem", "ren", "rename", "rmdir",
++ 			     "set", "setlocal", "shift", "start", "time",
++ 			     "type", "ver", "verify", "vol", 0 };
++ #define cmdcmp(x, y) (stricmp(x, y) == 0)
++ #else
++ #ifdef __MSDOS__
++   static char *sh_cmds[] = { "break", "call", "cd", "chcp", "chdir", "cls",
++ 			     "copy", "ctty", "date", "del", "dir", "echo",
++ 			     "erase", "exit", "for", "goto", "if", "if", "md",
++ 			     "mkdir", "path", "pause", "prompt", "rem", "ren",
++ 			     "rename", "set", "shift", "time", "type",
++ 			     "ver", "verify", "vol", ":", 0 };
++ #define cmdcmp(x, y) (stricmp(x, y) == 0)
++ #else
++   static char *sh_cmds[] = { "cd", "eval", "exec", "exit", "login",
++                              "logout", "set", "umask", "wait", "while", "for",
++                              "case", "if", ":", ".", "break", "continue",
++                              "export", "read", "readonly", "shift", "times",
++                              "trap", "switch", 0 };
++ #define cmdcmp(x, y) streq(x, y)
++ #endif
++ #endif
++   for (j = 0; sh_cmds[j] != 0; ++j)
++     if (cmdcmp (sh_cmds[j], str))
++       return 1;
++   return 0;
++ }
++ 
++ #ifdef __EMX__
++ 
++ char *
++ os2_shell(int for_cmd)
++ {
++   char *make_shell,*shell,*comspec,*os2_shell;
++ 
++   make_shell = getenv("MAKESHELL");
++   shell = getenv("SHELL");
++   comspec = getenv("COMSPEC");
++   os2_shell = getenv("OS2_SHELL");
++ 
++   if(make_shell != NULL && !for_cmd)
++     return make_shell;
++   else if(shell != NULL && !for_cmd)
++     return shell;
++   else if(comspec != NULL)
++     return comspec;
++   else if(os2_shell != NULL)
++     return os2_shell;
++   else
++     return default_shell;
++ }
++ 
++ int
++ is_shell(char *shell)
++ {
++   char basename[64];
++   char envShellBase[64];
++   char *envShell = getenv("SHELL");
++ 
++   if (envShell == 0)
++     return 0;
++ 
++   _splitpath(shell, NULL, NULL, basename, NULL);
++   _splitpath(envShell,NULL,NULL,envShellBase,NULL);
++ 
++   return stricmp(basename,envShellBase) == 0;
++ }
++ 
++ int
++ is_cmd_exe(char *shell)
++ {
++   char basename[64];
++ 
++   _splitpath(shell, NULL, NULL, basename, NULL);
++ 
++   return ((stricmp(basename,"4os2") == 0 || stricmp(basename,"cmd") == 0)
++        || (stricmp(basename,"4dos") == 0 || stricmp(basename,"command") == 0));
++ }
++ 
++ static int rexx_rc, rexx_run;
++ 
++ static int
++ wait_rexx (int *status)
++ {
++   if (rexx_run)
++   {
++     rexx_run = 0;
++     *status = (rexx_rc << 8);
++     return getpid();
++   }
++   else
++     return 0;
++ }
++ 
++ static int
++ run_rexx(char **argv)
++ {
++ #ifdef __WIN32__
++   return -1;
++ #else
++   char cmd[32768];
++   char resbuf[256];
++   RXSTRING rxcmd[2];
++   RXSTRING retstr;
++   int res, i;
++   short rc;
++ 
++   cmd[0] = 0;
++   for (i = 1; argv[i] != NULL; i++)
++     strcat(strcat(cmd, " "), argv[i]);
++ 
++   MAKERXSTRING(rxcmd[0], cmd, strlen(cmd));
++   MAKERXSTRING(rxcmd[1], 0, 0);
++   MAKERXSTRING(retstr, resbuf, sizeof(resbuf));
++ 
++   res = RexxStart(0, 0, "MAKE", rxcmd, "CMD", RXCOMMAND, 0, &rc, &retstr);
++ 
++   if (RXVALIDSTRING(rxcmd[1])) /* free tokenized image */
++     DosFreeMem(RXSTRPTR(rxcmd[1]));
++ 
++   rexx_rc = rc;
++   rexx_run = 1;
++   dead_children++;
++   errno = 0;
++ 
++   return getpid();
++ #endif
++ }
++ 
+  #endif /* !WINDOWS32 */
+  
+  #ifndef _AMIGA
+  /* Replace the current process with one running the command in ARGV,
+     with environment ENVP.  This function does not return.  */
+  
++ #ifdef __EMX__
++ int
++ #else
+  void
++ #endif
+  exec_command (argv, envp)
+       char **argv, **envp;
+  {
++ #ifdef __EMX__
++   int pid = -1;
++   char *old_cmd;
++   PATH_VAR(new_cmd);
++ #endif
++ 
+  #ifdef VMS
+    /* Run the program.  */
+    execve (argv[0], argv, envp);
+***************
+*** 1664,1671 ****
+--- 1883,1908 ----
+    child_access ();
+  
+    /* Run the program.  */
++ #ifdef __EMX__
++   if (stricmp(argv[0], REXX_KEYWORD) == 0)
++     pid = run_rexx(argv);
++   else if ((pid = spawnvpe(P_NOWAIT, argv[0], argv, envp)) != -1)
++     errno = 0;
++   else if (errno == ENOENT)
++   { /* try as a batch file */
++     strcpy(new_cmd, argv[0]);
++     strcat(new_cmd, (_osmode == OS2_MODE) ? ".cmd" : ".bat");
++     old_cmd = argv[0];
++     argv[0] = new_cmd;
++     if ((pid = spawnvpe(P_NOWAIT, argv[0], argv, envp)) != -1)
++       errno = 0;
++     else if (errno == ENOENT)
++       argv[0] = old_cmd;
++   }
++ #else
+    environ = envp;
+    execvp (argv[0], argv);
++ #endif
+  
+    switch (errno)
+      {
+***************
+*** 1678,1716 ****
+  	extern char *getenv ();
+  	char *shell;
+  	char **new_argv;
+! 	int argc;
+  
+  	shell = getenv ("SHELL");
+  	if (shell == 0)
+  	  shell = default_shell;
+  
+  	argc = 1;
+  	while (argv[argc] != 0)
+  	  ++argc;
+  
+  	new_argv = (char **) alloca ((1 + argc + 1) * sizeof (char *));
+  	new_argv[0] = shell;
+! 	new_argv[1] = argv[0];
+  	while (argc > 0)
+  	  {
+! 	    new_argv[1 + argc] = argv[argc];
+  	    --argc;
+  	  }
+  
+  	execvp (shell, new_argv);
+  	if (errno == ENOENT)
+  	  error ("%s: Shell program not found", shell);
+  	else
+  	  perror_with_name ("execvp: ", shell);
+  	break;
+        }
+  
+      default:
+        perror_with_name ("execvp: ", argv[0]);
+        break;
+      }
+  
+    _exit (127);
+  #endif /* !WINDOWS32 */
+  #endif /* !VMS */
+  }
+--- 1915,1977 ----
+  	extern char *getenv ();
+  	char *shell;
+  	char **new_argv;
+! 	int argc, arg;
+  
+  	shell = getenv ("SHELL");
+  	if (shell == 0)
++ #ifdef __EMX__
++ 	  shell = os2_shell(1);
++ #else
+  	  shell = default_shell;
++ #endif
+  
+  	argc = 1;
+  	while (argv[argc] != 0)
+  	  ++argc;
+  
++ 	arg = 0;
++ #ifdef __EMX__
++ 	new_argv = (char **) alloca ((1 + argc + 2) * sizeof (char *));
++ 	new_argv[0] = shell;
++ 	new_argv[++arg] = is_cmd_exe(shell) ? "/c" : "-c";
++ #else
+  	new_argv = (char **) alloca ((1 + argc + 1) * sizeof (char *));
+  	new_argv[0] = shell;
+! #endif
+! 	new_argv[++arg] = argv[0];
+! 
+  	while (argc > 0)
+  	  {
+! 	    new_argv[arg + argc] = argv[argc];
+  	    --argc;
+  	  }
+  
++ #ifdef __EMX__
++ 	pid = spawnvpe(P_NOWAIT, shell, new_argv, envp);
++ 	if (pid == -1)
++ 	  perror_with_name ("spawnvp: ", shell);
++ #else
+  	execvp (shell, new_argv);
+  	if (errno == ENOENT)
+  	  error ("%s: Shell program not found", shell);
+  	else
+  	  perror_with_name ("execvp: ", shell);
++ #endif
+  	break;
+        }
+  
++ #ifndef __EMX__
+      default:
+        perror_with_name ("execvp: ", argv[0]);
+        break;
++ #endif
+      }
+  
++ #ifdef __EMX__
++   return pid;
++ #else
+    _exit (127);
++ #endif
+  #endif /* !WINDOWS32 */
+  #endif /* !VMS */
+  }
+***************
+*** 1747,1753 ****
+--- 2008,2020 ----
+       char *line, **restp;
+       char *shell, *ifs;
+  {
++ 
++ #ifdef __EMX__
++   static char sh_chars[] = "&|<>^()%`";
++   int is_cmd = 1;
++ #else
+  #ifdef __MSDOS__
++   static char sh_chars[] = "\"|<>";
+    /* MSDOS supports both the stock DOS shell and ports of Unixy shells.
+       We call `system' for anything that requires ``slow'' processing,
+       because DOS shells are too dumb.  When $SHELL points to a real
+***************
+*** 1823,1828 ****
+--- 2090,2096 ----
+  #endif /* WINDOWS32 */
+  #endif /* Amiga */
+  #endif /* __MSDOS__ */
++ #endif
+    register int i;
+    register char *p;
+    register char *ap;
+***************
+*** 1850,1857 ****
+--- 2118,2139 ----
+    if (*line == '\0')
+      return 0;
+  
++ #ifdef __EMX__
++   if (strnicmp(line, REXX_KEYWORD, sizeof(REXX_KEYWORD) - 1) == 0 &&
++       isspace(line[sizeof(REXX_KEYWORD) - 1]))
++     {
++       shell = os2_shell(1);
++     }
++ #endif
++ 
+    /* See if it is safe to parse commands internally.  */
+    if (shell == 0)
++ #ifdef __EMX__
++     shell = os2_shell(0);
++   else if (!(is_cmd = is_cmd_exe(shell)))
++     if (! is_shell(shell))
++       goto slow;
++ #else
+      shell = default_shell;
+  #ifdef WINDOWS32
+    else if (strcmp (shell, default_shell))
+***************
+*** 1893,1898 ****
+--- 2175,2181 ----
+      goto slow;
+  #endif /* not __MSDOS__ */
+  #endif /* not WINDOWS32 */
++ #endif
+  
+    if (ifs != 0)
+      for (ap = ifs; *ap != '\0'; ++ap)
+***************
+*** 1929,1934 ****
+--- 2212,2221 ----
+  	    }
+  	  else if (*p == '\\' && p[1] == '\n')
+  	    goto swallow_escaped_newline;
++ #ifdef __EMX__
++ 	  else if (*p == '\\') /* except if guarded by \ */
++ 	    *ap++ = *++p;
++ #endif
+  	  else if (*p == '\n' && restp != NULL)
+  	    {
+  	      /* End of the command line.  */
+***************
+*** 1997,2005 ****
+  		      p = next_token (p) - 1;
+  		  }
+  	      }
+! 	    else if (p[1] != '\0')
+  	      /* Copy and skip the following char.  */
+  	      *ap++ = *++p;
+  	    break;
+  
+  	  case '\'':
+--- 2284,2299 ----
+  		      p = next_token (p) - 1;
+  		  }
+  	      }
+! 	    else if (p[1] != '\0') {
+! #ifdef __EMX__
+! 	      /* for OS/2, let's keep single \ before characters and numbers
+! 		 because \ is commonly used as path name separator */
+! 	      if (isalnum(p[1]))
+! 		*ap++ = *p;
+! #endif
+  	      /* Copy and skip the following char.  */
+  	      *ap++ = *++p;
++ 	    }
+  	    break;
+  
+  	  case '\'':
+***************
+*** 2040,2053 ****
+  	    /* If this argument is the command name,
+  	       see if it is a built-in shell command.
+  	       If so, have the shell handle it.  */
+! 	    if (i == 1)
+! 	      {
+! 		register int j;
+! 		for (j = 0; sh_cmds[j] != 0; ++j)
+! 		  if (streq (sh_cmds[j], new_argv[0]))
+  		    goto slow;
+  	      }
+- 
+  	    /* Ignore multiple whitespace chars.  */
+  	    p = next_token (p);
+  	    /* Next iteration should examine the first nonwhite char.  */
+--- 2334,2343 ----
+  	    /* If this argument is the command name,
+  	       see if it is a built-in shell command.
+  	       If so, have the shell handle it.  */
+! 	    if (i == 1) {
+! 	        if(is_shell_command(new_argv[0]))
+  		    goto slow;
+  	      }
+  	    /* Ignore multiple whitespace chars.  */
+  	    p = next_token (p);
+  	    /* Next iteration should examine the first nonwhite char.  */
+***************
+*** 2074,2082 ****
+  
+    if (i == 1)
+      {
+!       register int j;
+!       for (j = 0; sh_cmds[j] != 0; ++j)
+! 	if (streq (sh_cmds[j], new_argv[0]))
+  	  goto slow;
+      }
+  
+--- 2364,2370 ----
+  
+    if (i == 1)
+      {
+!       if (is_shell_command(new_argv[0]))
+  	  goto slow;
+      }
+  
+***************
+*** 2184,2200 ****
+         argument list.  */
+  
+      unsigned int shell_len = strlen (shell);
+-     static char minus_c[] = " -c ";
+      unsigned int line_len = strlen (line);
+! 
+!     char *new_line = (char *) alloca (shell_len + (sizeof (minus_c) - 1)
+  				      + (line_len * 2) + 1);
+- 
+      ap = new_line;
+      bcopy (shell, ap, shell_len);
+      ap += shell_len;
+!     bcopy (minus_c, ap, sizeof (minus_c) - 1);
+!     ap += sizeof (minus_c) - 1;
+      for (p = line; *p != '\0'; ++p)
+        {
+  	if (restp != NULL && *p == '\n')
+--- 2472,2492 ----
+         argument list.  */
+  
+      unsigned int shell_len = strlen (shell);
+      unsigned int line_len = strlen (line);
+!     char *new_line;
+!     char *minus_c = " -c ";
+! #define MINUS_C_SIZE strlen(minus_c)
+! #ifdef __EMX__
+!     if(is_cmd)
+!       minus_c = " /c ";
+! #endif
+!     new_line = (char *) alloca (shell_len + MINUS_C_SIZE
+  				      + (line_len * 2) + 1);
+      ap = new_line;
+      bcopy (shell, ap, shell_len);
+      ap += shell_len;
+!     bcopy (minus_c, ap, MINUS_C_SIZE);
+!     ap += MINUS_C_SIZE;
+      for (p = line; *p != '\0'; ++p)
+        {
+  	if (restp != NULL && *p == '\n')
+***************
+*** 2209,2217 ****
+  	       from the shell).  */
+  	    p += 2;
+  
+! 	    /* If there is a tab after a backslash-newline,
+! 	       remove it from the source line which will be echoed,
+! 	       since it was most likely used to line
+  	       up the continued line with the previous one.  */
+  	    if (*p == '\t')
+  	      bcopy (p + 1, p, strlen (p));
+--- 2501,2509 ----
+  	       from the shell).  */
+  	    p += 2;
+  
+! 	    /* If there are tabs after a backslash-newline,
+! 	       remove them from the source line which will be echoed,
+! 	       since they were most likely used to line
+  	       up the continued line with the previous one.  */
+  	    if (*p == '\t')
+  	      bcopy (p + 1, p, strlen (p));
+***************
+*** 2219,2234 ****
+--- 2511,2535 ----
+  	    p = next_token (p);
+  	    --p;
+              if (unixy_shell)
++ #ifdef __EMX__
++ 	   /* if (!is_cmd) /* causes problems ... */
++ #endif
+                *ap++ = '\\';
+  	    *ap++ = ' ';
+  	    continue;
+  	  }
+  
++ #ifdef __EMX__
++ 	if ((*p == '\\' && (!is_cmd || !isalnum(p[1]))) || *p == '\'' || *p == '"'
++ 	    || isspace (*p)
++ 	    || index (sh_chars, *p) != 0)
++ #else
+          /* DOS shells don't know about backslash-escaping.  */
+  	if (unixy_shell &&
+              (*p == '\\' || *p == '\'' || *p == '"'
+               || isspace (*p)
+               || index (sh_chars, *p) != 0))
++ #endif	
+  	  *ap++ = '\\';
+  #ifdef __MSDOS__
+          else if (unixy_shell && strncmp (p, "...", 3) == 0)
+diff -cbr orig/job.h ./job.h
+*** orig/job.h	Fri Jun 30 20:36:52 2000
+--- ./job.h	Fri Apr 24 20:37:52 1998
+***************
+*** 53,58 ****
+--- 53,59 ----
+  extern void start_waiting_jobs PARAMS ((void));
+  
+  extern char **construct_command_argv PARAMS ((char *line, char **restp, struct file *file));
++ #ifndef __EMX__
+  #ifdef VMS
+  extern int child_execute_job PARAMS ((char *argv, struct child *child));
+  #else
+***************
+*** 62,67 ****
+--- 63,72 ----
+  extern void exec_command PARAMS ((char **argv));
+  #else
+  extern void exec_command PARAMS ((char **argv, char **envp));
++ #endif
++ #else
++ extern int child_execute_job PARAMS ((int stdin_fd, int stdout_fd, char **argv, char **envp));
++ extern int exec_command PARAMS ((char **argv, char **envp));
+  #endif
+  
+  extern unsigned int job_slots_used;
+diff -cbr orig/main.c ./main.c
+*** orig/main.c	Fri Jun 30 20:36:52 2000
+--- ./main.c	Mon Sep  4 17:49:16 2000
+***************
+*** 556,561 ****
+--- 556,566 ----
+  int main (int argc, char ** argv)
+  #endif
+  {
++ #ifdef __EMX__
++   unsigned long     curMaxFH = 0;
++   long              reqCount = 0;
++   int               rc      = 0;
++ #endif
+    register struct file *f;
+    register unsigned int i;
+    char **p;
+***************
+*** 569,574 ****
+--- 574,591 ----
+    SetUnhandledExceptionFilter(handle_runtime_exceptions);
+  #endif
+  
++ #if defined(__EMX__) && !defined(__RSXNT__)
++   /* increase # of file handles */
++   rc = DosSetRelMaxFH( &reqCount, &curMaxFH );
++   if( curMaxFH < 40 ) {
++      reqCount = 20;
++      rc = DosSetRelMaxFH( &reqCount, &curMaxFH );
++   }
++ 
++   _response(&argc,&argv);
++   _wildcard(&argc,&argv);
++ #endif
++ 
+    default_goal_file = 0;
+    reading_filename = 0;
+    reading_lineno_ptr = 0;
+***************
+*** 813,823 ****
+        !strncmp(argv[0], "//", 2))
+      argv[0] = strdup(w32ify(argv[0],1));
+  #else /* WINDOWS32 */
+    if (current_directory[0] != '\0'
+        && argv[0] != 0 && argv[0][0] != '/' && index (argv[0], '/') != 0)
+      argv[0] = concat (current_directory, "/", argv[0]);
+! #endif /* WINDOWS32 */
+  #endif
+  
+    /* The extra indirection through $(MAKE_COMMAND) is done
+       for hysterical raisins.  */
+--- 830,857 ----
+        !strncmp(argv[0], "//", 2))
+      argv[0] = strdup(w32ify(argv[0],1));
+  #else /* WINDOWS32 */
++ #ifndef __EMX__
+    if (current_directory[0] != '\0'
+        && argv[0] != 0 && argv[0][0] != '/' && index (argv[0], '/') != 0)
+      argv[0] = concat (current_directory, "/", argv[0]);
+! #else
+!   if (current_directory[0] != '\0' && /* there is a cwd */
+!       argv[0] != 0 &&			/* there is an argv[0] */
+!       (argv[0][0] != '/' &&		/* and it doesn't begin with slash */
+!       argv[0][0] != '\\' &&		/* or a backslash */
+!       argv[0][1] != ':') &&		/* or start with a drive letter */
+!       (index (argv[0], '/') != 0 ||	/*  it does contain a slash */
+!       index (argv[0], '\\') != 0))	/* or a backslash */
+!     argv[0] = concat (current_directory, "/", argv[0]);
+!   {
+!     char *cp;
+!     for(cp = argv[0]; *cp != '\0'; cp++)
+!       *cp = (*cp == '\\') ? '/' : *cp;
+!   }
+! #endif
+  #endif
++ #endif /* WINDOWS32 */
++ 
+  
+    /* The extra indirection through $(MAKE_COMMAND) is done
+       for hysterical raisins.  */
+***************
+*** 1495,1502 ****
+--- 1529,1544 ----
+  	  fflush (stderr);
+  
+  #ifndef _AMIGA
++ #ifndef __EMX__
+  	  exec_command (nargv, environ);
+  #else
++       /*
++       sharon changed argv to nargv
++       exit(exec_command (argv, environ));
++       */
++ 	  exit(exec_command (nargv, environ));
++ #endif
++ #else
+  	  exec_command (nargv);
+  	  exit (0);
+  #endif
+***************
+*** 1856,1862 ****
+        /* Print a nice usage message.  */
+        FILE *usageto;
+  
+-       if (print_version_flag)
+  	print_version ();
+  
+        usageto = bad ? stderr : stdout;
+--- 1898,1903 ----
+***************
+*** 2383,2397 ****
+        if (print_version_flag)
+  	print_version ();
+  
+        /* Wait for children to die.  */
+        for (err = status != 0; job_slots_used > 0; err = 0)
+  	reap_children (1, err);
+  
+        /* Let the remote job module clean up its state.  */
+        remote_cleanup ();
+- 
+-       /* Remove the intermediate files.  */
+-       remove_intermediates (0);
+  
+        if (print_data_base_flag)
+  	print_data_base ();
+--- 2424,2438 ----
+        if (print_version_flag)
+  	print_version ();
+  
++       /* Remove the intermediate files.  */
++       remove_intermediates (0);
++ 
+        /* Wait for children to die.  */
+        for (err = status != 0; job_slots_used > 0; err = 0)
+  	reap_children (1, err);
+  
+        /* Let the remote job module clean up its state.  */
+        remote_cleanup ();
+  
+        if (print_data_base_flag)
+  	print_data_base ();
+diff -cbr orig/make.h ./make.h
+*** orig/make.h	Fri Jun 30 20:36:52 2000
+--- ./make.h	Mon Jun  1 21:07:56 1998
+***************
+*** 118,123 ****
+--- 118,127 ----
+  #include <sys/param.h>
+  #endif
+  
++ #if defined(__EMX__) || defined(__IBMC__)
++ #define PATH_MAX _POSIX_PATH_MAX
++ #endif
++ 
+  #ifndef	PATH_MAX
+  #ifndef	POSIX
+  #define	PATH_MAX	MAXPATHLEN
+***************
+*** 249,261 ****
+--- 253,277 ----
+  #ifdef	HAVE_ALLOCA_H
+  #include <alloca.h>
+  #else	/* Not HAVE_ALLOCA_H.  */
++ #ifdef	HAVE_STDLIB_H
++ #include <stdlib.h>
++ #else
+  #ifndef	_AIX
+  extern char *alloca ();
++ #endif
+  #endif	/* Not AIX.  */
+  #endif	/* HAVE_ALLOCA_H.  */
+  #endif	/* GCC.  */
+  
++ 
+  #ifndef	iAPX286
++ #if defined(__EMX__) || defined(__IBMC__)
++ /* OS/2 ignores case when comparing filenames */
++ #define streq(a, b) \
++   ((a) == (b) || \
++    (tolower(*(a)) == tolower(*(b)) && (*(a) == '\0' || !stricmp ((a) + 1, (b) + 1))))
++ #define strieq(a, b) streq(a,b)
++ #else
+  #define streq(a, b) \
+    ((a) == (b) || \
+     (*(a) == *(b) && (*(a) == '\0' || !strcmp ((a) + 1, (b) + 1))))
+***************
+*** 268,273 ****
+--- 284,290 ----
+    ((a) == (b) || \
+     (*(a) == *(b) && (*(a) == '\0' || !strcmp ((a) + 1, (b) + 1))))
+  #endif
++ #endif
+  #else
+  /* Buggy compiler can't handle this.  */
+  #define streq(a, b) (strcmp ((a), (b)) == 0)
+***************
+*** 275,282 ****
+--- 292,305 ----
+  #endif
+  
+  /* Add to VAR the hashing value of C, one character in a name.  */
++ #if defined(__EMX__) || defined(__IBMC__)
++ /* OS/2 ignores case when comparing filenames */
++ #define	HASH(var, c)  \
++   ((var += (toupper(c))), (var = ((var) << 7) + ((var) >> 20)))
++ #else
+  #define	HASH(var, c) \
+    ((var += (c)), (var = ((var) << 7) + ((var) >> 20)))
++ #endif
+  #ifdef _AMIGA /* Fold filenames on #amiga */
+  #define HASHI(var, c) \
+    ((var += tolower((c))), (var = ((var) << 7) + ((var) >> 20)))
+***************
+*** 296,304 ****
+--- 319,331 ----
+  #if defined(VMS)
+  #define PATH_SEPARATOR_CHAR ','
+  #else
++ #if defined(__EMX__) || defined(__IBMC__)
++ #define PATH_SEPARATOR_CHAR _path_separator_char(';')
++ #else
+  #define PATH_SEPARATOR_CHAR ':'
+  #endif
+  #endif
++ #endif
+  
+  #ifdef WINDOWS32
+  #include <fcntl.h>
+***************
+*** 401,407 ****
+--- 428,442 ----
+  #define	getcwd(buf, len)	getwd (buf)
+  #endif
+  
++ #if defined(sgi) || defined(__EMX__)
+  extern char **environ;
++ #else
++ #ifndef NSIG
++ #define NSIG 33
++ #endif
++ extern char **_environ;
++ #define environ _environ
++ #endif
+  
+  extern char *reading_filename;
+  extern unsigned int *reading_lineno_ptr;
+diff -cbr orig/read.c ./read.c
+*** orig/read.c	Fri Jun 30 20:36:52 2000
+--- ./read.c	Fri Apr 24 20:37:54 1998
+***************
+*** 400,405 ****
+--- 400,411 ----
+        lineno += nlines;
+        nlines = readline (&lb, infile, filename, lineno);
+  
++ #ifdef __DONT_DO_THAT__
++       /* Force initial space to be TAB */
++       if (lb.buffer[0] == ' ' && lb.buffer[1] == ' ')
++       	  lb.buffer[0] = '\t';
++ #endif
++ 
+        /* Check for a shell command line first.
+  	 If it is not one, we can stop treating tab specially.  */
+        if (lb.buffer[0] == '\t')
+***************
+*** 771,776 ****
+--- 777,787 ----
+  
+  	  /* Is this a static pattern rule: `target: %targ: %dep; ...'?  */
+  	  p = index (p2, ':');
++ #ifdef __EMX__
++ 	  /* allow path names with drive specifications (x:) */
++ 	  while (p != 0 && !isspace(p[1]))
++ 	    p = index (p + 1, ':');
++ #endif
+  	  while (p != 0 && p[-1] == '\\')
+  	    {
+  	      register char *q = &p[-1];
+***************
+*** 1338,1343 ****
+--- 1349,1358 ----
+  				     pattern_percent, percent);
+  		free (d->name);
+  		d->name = savestring (buffer, o - buffer);
++ #ifdef __EMX__
++ 		if (d->name[0] != '.')
++ 		  _fnlwr(d->name);
++ #endif
+  	      }
+  	  }
+  
+***************
+*** 1500,1506 ****
+--- 1515,1525 ----
+  	      for (d2 = suffix_file->deps; d2 != 0; d2 = d2->next)
+  		{
+  		  register unsigned int len = strlen (dep_name (d2));
++ #ifdef __EMX__
++ 		  if (strnicmp (name, dep_name (d2), len))
++ #else
+  		  if (strncmp (name, dep_name (d2), len))
++ #endif
+  		    continue;
+  		  if (streq (name + len, dep_name (d)))
+  		    {
+***************
+*** 1543,1551 ****
+--- 1562,1579 ----
+  
+    while (1)
+      {
++ #ifdef __EMX__
++           while (*p != '\0' && (!blank || !isblank (*p)))
++             if (index (stopchars, *p) != 0 && 
++ 		(*p != ':' || isblank(p[1]) || p[1] == 0 || p[1] == ':' || p[1] == ';'))
++               break;
++             else
++               ++p;
++ #else
+        while (*p != '\0' && index (stopchars, *p) == 0
+  	     && (!blank || !isblank (*p)))
+  	++p;
++ #endif
+        if (*p == '\0')
+  	break;
+  
+***************
+*** 1923,1928 ****
+--- 1951,1958 ----
+        if (!backslash)
+  	{
+  	  p[-1] = '\0';
++ 	  if (p - p2 > 2)
++ 	    p[-2] = '\0'; /* kill one of multiple backslashes */
+  	  break;
+  	}
+  
+***************
+*** 2154,2159 ****
+--- 2184,2193 ----
+  	    {
+  	      free (old->name);
+  	      old->name = newname;
++ #ifdef __EMX__
++ 	      if (old->name[0] != '.')
++ 		_fnlwr(old->name);
++ #endif
+  	    }
+  	}
+  
+***************
+*** 2224,2229 ****
+--- 2258,2267 ----
+  		    struct nameseq *elt = (struct nameseq *) xmalloc (size);
+  		    elt->name = savestring (gl.gl_pathv[i],
+  					    strlen (gl.gl_pathv[i]));
++ #ifdef __EMX__
++ 		    if (old->name[0] != '.')
++ 		      _fnlwr(elt->name);
++ #endif
+  		    elt->next = new;
+  		    new = elt;
+  		  }
+diff -cbr orig/variable.c ./variable.c
+*** orig/variable.c	Fri Jun 30 20:36:52 2000
+--- ./variable.c	Sun May 24 20:54:32 1998
+***************
+*** 371,377 ****
+  	   ? "" : remote_description);
+    (void) define_variable ("MAKE_VERSION", 12, buf, o_default, 0);
+  
+! #ifdef  __MSDOS__
+    /* Allow to specify a special shell just for Make,
+       and use $COMSPEC as the default $SHELL when appropriate.  */
+    {
+--- 371,377 ----
+  	   ? "" : remote_description);
+    (void) define_variable ("MAKE_VERSION", 12, buf, o_default, 0);
+  
+! #if defined(__MSDOS__) || defined(__EMX__)
+    /* Allow to specify a special shell just for Make,
+       and use $COMSPEC as the default $SHELL when appropriate.  */
+    {
+***************
+*** 403,409 ****
+    /* On MSDOS we do use SHELL from environment, since
+       it isn't a standard environment variable on MSDOS,
+       so whoever sets it, does that on purpose.  */
+! #ifndef __MSDOS__
+    /* Don't let SHELL come from the environment.  */
+    if (*v->value == '\0' || v->origin == o_env || v->origin == o_env_override)
+      {
+--- 403,409 ----
+    /* On MSDOS we do use SHELL from environment, since
+       it isn't a standard environment variable on MSDOS,
+       so whoever sets it, does that on purpose.  */
+! #if !(defined(__MSDOS__) || defined(__EMX__))
+    /* Don't let SHELL come from the environment.  */
+    if (*v->value == '\0' || v->origin == o_env || v->origin == o_env_override)
+      {
+***************
+*** 413,418 ****
+--- 413,426 ----
+      }
+  #endif
+  
++ #ifdef NO__EMX__
++   {
++     char *cp;
++     for(cp = v->value; *cp != '\0'; cp++)
++       *cp = (*cp == '\\' ? '/' : *cp);
++   }
++ #endif	
++ 
+    /* Make sure MAKEFILES gets exported if it is set.  */
+    v = define_variable ("MAKEFILES", 9, "", o_default, 0);
+    v->export = v_ifset;
+***************
+*** 693,698 ****
+--- 701,709 ----
+      --end;
+    p = next_token (p);
+  
++   /* don't try to do this for empty names */
++   if(end < beg)
++     return 0;
+    /* Expand the name, so "$(foo)bar = baz" works.  */
+    name = (char *) alloca (end - beg + 1);
+    bcopy (beg, name, end - beg);
+diff -cbr orig/vpath.c ./vpath.c
+*** orig/vpath.c	Fri Jun 30 20:36:54 2000
+--- ./vpath.c	Fri Apr 24 22:04:36 1998
+***************
+*** 346,352 ****
+       there is nothing we can do.  */
+  
+    if (**file == '/'
+! #if defined (WINDOWS32) || defined (__MSDOS__)
+        || **file == '\\'
+        || (*file)[1] == ':'
+  #endif
+--- 346,352 ----
+       there is nothing we can do.  */
+  
+    if (**file == '/'
+! #if defined (WINDOWS32) || defined (__MSDOS__) || defined(__EMX__)
+        || **file == '\\'
+        || (*file)[1] == ':'
+  #endif
+***************
+*** 379,385 ****
+       time_t *mtime_ptr;
+  {
+    int not_target;
+!   char *name, *n;
+    char *filename;
+    register char **vpath = path->searchpath;
+    unsigned int maxvpath = path->maxlen;
+--- 379,385 ----
+       time_t *mtime_ptr;
+  {
+    int not_target;
+!   char *name, *n, sep = '/';
+    char *filename;
+    register char **vpath = path->searchpath;
+    unsigned int maxvpath = path->maxlen;
+***************
+*** 402,408 ****
+       pointer to the name-within-directory and FLEN is its length.  */
+  
+    n = rindex (*file, '/');
+! #if defined (WINDOWS32) || defined (__MSDOS__)
+    /* We need the rightmost slash or backslash.  */
+    {
+      char *bslash = rindex(*file, '\\');
+--- 402,408 ----
+       pointer to the name-within-directory and FLEN is its length.  */
+  
+    n = rindex (*file, '/');
+! #if defined (WINDOWS32) || defined (__MSDOS__) || defined(__EMX__)
+    /* We need the rightmost slash or backslash.  */
+    {
+      char *bslash = rindex(*file, '\\');
+***************
+*** 443,449 ****
+  	  n += name_dplen;
+  	}
+  
+! #if defined (WINDOWS32) || defined (__MSDOS__)
+        /* Cause the next if to treat backslash and slash alike.  */
+        if (n != name && n[-1] == '\\' )
+  	n[-1] = '/';
+--- 443,449 ----
+  	  n += name_dplen;
+  	}
+  
+! #if defined (WINDOWS32) || defined (__MSDOS__) || defined(__EMX__)
+        /* Cause the next if to treat backslash and slash alike.  */
+        if (n != name && n[-1] == '\\' )
+  	n[-1] = '/';
+***************
+*** 488,493 ****
+--- 488,494 ----
+  #else
+  	  /* Clobber a null into the name at the last slash.
+  	     Now NAME is the name of the directory to look in.  */
++ 	  sep = *n;
+  	  *n = '\0';
+  
+  	  /* We know the directory is in the hash table now because either
+***************
+*** 509,515 ****
+  
+  #ifndef VMS
+  	  /* Put the slash back in NAME.  */
+! 	  *n = '/';
+  #endif
+  
+  	  if (!exists_in_cache	/* Makefile-mentioned file need not exist.  */
+--- 510,516 ----
+  
+  #ifndef VMS
+  	  /* Put the slash back in NAME.  */
+! 	  *n = sep;
+  #endif
+  
+  	  if (!exists_in_cache	/* Makefile-mentioned file need not exist.  */
+***************
+*** 580,583 ****
+--- 581,600 ----
+  	printf ("%s%c", path[i],
+  		path[i + 1] == 0 ? '\n' : PATH_SEPARATOR_CHAR);
+      }
++ }
++ 
++ /* handle PATH_SEPARATOR_CHAR override */
++ 
++ int _path_separator_char(int deflt)
++ {
++   static int queried;
++   static char *env;
++ 
++   if (queried == 0)
++   {
++     env = getenv("PATH_SEPARATOR_CHAR");
++     queried = 1;
++   }
++ 
++   return env ? *env : deflt;
+  }
