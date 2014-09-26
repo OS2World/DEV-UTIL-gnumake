@@ -14,7 +14,8 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with GNU Make; see the file COPYING.  If not, write to
-the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
+the Free Software Foundation, Inc., 59 Temple Place - Suite 330, Boston,
+MA 02111-1307, USA.  */
 
 #include "make.h"
 #include "variable.h"
@@ -29,8 +30,7 @@ static const char Amiga_version[] = "$VER: Make 3.74.3 (12.05.96) \n"
 		    "Amiga Port by A. Digulla (digulla@home.lake.de)";
 
 int
-MyExecute (argv)
-char ** argv;
+MyExecute (char **argv)
 {
     char * buffer, * ptr;
     char ** aptr;
@@ -45,7 +45,7 @@ char ** argv;
     buffer = AllocMem (len, MEMF_ANY);
 
     if (!buffer)
-      fatal ("MyExecute: Cannot allocate space for calling a command");
+      fatal (NILF, "MyExecute: Cannot allocate space for calling a command");
 
     ptr = buffer;
 
@@ -91,8 +91,7 @@ char ** argv;
 }
 
 char *
-wildcard_expansion (wc, o)
-char * wc, * o;
+wildcard_expansion (char *wc, char *o)
 {
 #   define PATH_SIZE	1024
     struct AnchorPath * apath;

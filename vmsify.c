@@ -8,6 +8,7 @@
 
 */
 
+#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 
@@ -78,8 +79,8 @@ copyto (char **to, char **from, char upto, int as_dir)
 	}
       else
 	{
-	  if (islower (**from))
-	    **to = toupper (**from);
+	  if (isupper ((unsigned char)**from))
+	    **to = tolower ((unsigned char)**from);
 	  else
 	    **to = **from;
 	}
@@ -126,6 +127,27 @@ trnlog (char *name)
   strcpy (s, reslt);
   return s;
 }
+
+static char *
+showall (char *s)
+{
+  static char t[512];
+  char *pt;
+
+  pt = t;
+  if (strchr (s, '\\') == 0)
+    return s;
+  while (*s)
+    {
+      if (*s == '\\')
+	{
+	  *pt++ = *s;
+	}
+      *pt++ = *s++;
+    }
+  return pt;
+}
+
 
 enum namestate { N_START, N_DEVICE, N_OPEN, N_DOT, N_CLOSED, N_DONE };
 
@@ -174,9 +196,7 @@ enum namestate { N_START, N_DEVICE, N_OPEN, N_DOT, N_CLOSED, N_DONE };
 */
 
 char *
-vmsify (name, type)
-    char *name;
-    int type;
+vmsify (char *name, int type)
 {
 /* max 255 device
    max 39 directory
@@ -205,16 +225,39 @@ vmsify (name, type)
   s = strpbrk (name, "$:");
   if (s != 0)
     {
+      char *s1;
+      char *s2;
+
+      if (type == 1)
+	{
+	  s1 = strchr (s+1, '[');
+	  s2 = strchr (s+1, ']');
+	}
+
       if (*s == '$')
 	{
 	  if (strchr (name, '/') == 0)
 	    {
-	      return name;
+	      if ((type == 1) && (s1 != 0) && (s2 == 0))
+		{
+		  strcpy (vmsname, name);
+		  strcat (vmsname, "]");
+		  return vmsname;
+		}
+	      else
+		return name;
 	    }
 	}
       else
 	{
-	  return name;
+	  if ((type == 1) && (s1 != 0) && (s2 == 0))
+	    {
+	      strcpy (vmsname, name);
+	      strcat (vmsname, "]");
+	      return vmsname;
+	    }
+	  else
+	    return name;
 	}
     }
 
@@ -227,7 +270,15 @@ vmsify (name, type)
       s1 = strchr (s+1, '[');
       if (s1 == 0)
 	{
-	  return name;			/* single [, keep unchanged */
+	  if ((type == 1)
+	       && (strchr (s+1, ']') == 0))
+	    {
+	      strcpy (vmsname, name);
+	      strcat (vmsname, "]");
+	      return vmsname;
+	    }
+	  else
+	    return name;			/* single [, keep unchanged */
 	}
       s1--;
       if (*s1 != ']')
@@ -661,7 +712,7 @@ vmsify (name, type)
 			    nstate = N_OPEN;
 			    break;
 			  }
-		      } 
+		      }
 		  }
 	      }
 	    else
@@ -779,7 +830,8 @@ vmsify (name, type)
 		  {
 		    return name;
 		  }
-		fptr++;
+		while (*fptr == '/')
+		  fptr++;
 	      }
 
 	    {
@@ -815,7 +867,7 @@ vmsify (name, type)
 
 	}
       while (state > 0);
-      
+
 
     }
 

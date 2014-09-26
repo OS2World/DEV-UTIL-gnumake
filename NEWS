@@ -1,11 +1,337 @@
 GNU make NEWS                                               -*-indented-text-*-
   History of user-visible changes.
-  19 Sep 1997
+  27 June 2005
 
-Copyright (C) 1992, 1993, 1994, 1995, 1996, 1997 Free Software Foundation, Inc.
+Copyright (C) 2002,2003,2004,2005  Free Software Foundation, Inc.
 See the end for copying conditions.
 
-Please send GNU make bug reports to bug-gnu-utils@prep.ai.mit.edu.
+All changes mentioned here are more fully described in the GNU make
+manual, which is contained in this distribution as the file doc/make.texi.
+See the README file and the GNU make manual for instructions for
+reporting bugs.
+
+Version 3.81beta3
+
+* GNU make is ported to OS/2.
+
+* GNU make is ported to MinGW.
+
+* WARNING: Backward-incompatibility!
+  GNU make now implements a generic "second expansion" feature on the
+  prerequisites of both explicit and implicit (pattern) rules.  After
+  all rules have been parsed the prerequisites are expanded again, this
+  time with all the automatic variables in scope.  This means that in
+  addition to using standard SysV $$@ in prerequisites lists, you can
+  also use complex functions such as $$(notdir $$@) etc.  This behavior
+  applies to implicit rules, as well, where the second expansion occurs
+  after the rule is matched.  However, this means that you need to
+  double-quote any "$" in your filenames; instead of "foo: boo$$bar" you
+  now must write "foo: foo$$$$bar".
+
+* WARNING: Backward-incompatibility!
+  In order to comply with POSIX, the way in which GNU make processes
+  backslash-newline sequences in command strings has changed.  See the
+  GNU make manual section "Shell Execution" for details.
+
+* New command-line option: -L (--check-symlink-times).  On systems that
+  support symbolic links, if this option is given then GNU make will
+  use the most recent modification time of any symbolic links that are
+  used to resolve target files.  The default behavior remains as it
+  always has: use the modification time of the actual target file only.
+
+* The "else" conditional line can now be followed by any other legal
+  conditional on the same line: this does not increase the depth of the
+  conditional nesting, so only one "endif" is required to close the
+  conditional.
+
+* All pattern-specific variables that match a given target are now used
+  (previously only the first match was used).
+
+* Target-specific variables can be marked as exportable using the
+  "export" keyword.
+
+* In a recursive $(call ...) context, any extra arguments from the outer
+  call are now masked in the context of the inner call.
+
+* Implemented a solution for the "thundering herd" problem with "-j -l".
+  This version of GNU make uses an algorithm suggested by Thomas Riedl
+  <thomas.riedl@siemens.com> to track the number of jobs started in the
+  last second and artificially adjust GNU make's view of the system's
+  load average accordingly.
+
+* New special variables available in this release:
+   - .FEATURES: Contains a list of special features available in this
+     version of GNU make.
+   - .DEFAULT_GOAL: Set the name of the default goal make will
+     use if no goals are provided on the command line.
+   - MAKE_RESTARTS: If set, then this is the number of times this
+     instance of make has been restarted (see "How Makefiles Are Remade"
+     in the manual).
+   - New automatic variable: $| (added in 3.80, actually): contains all
+     the order-only prerequisites defined for the target.
+
+* New functions available in this release:
+   - $(lastword ...) returns the last word in the list.  This gives
+     identical results as $(word $(words ...) ...), but is much faster.
+   - $(abspath ...) returns the absolute path (all "." and ".."
+     directories resolved, and any duplicate "/" characters removed) for
+     each path provided.
+   - $(realpath ...) returns the canonical pathname for each path
+     provided.  The canonical pathname is the absolute pathname, with
+     all symbolic links resolved as well.
+   - $(info ...) prints informative messages to stdout.  No makefile
+     name or line number info, etc. is printed, just the message.
+
+* Changes made for POSIX compatibility:
+   - Only touch targets (under -t) if they have at least one command.
+   - Setting the SHELL make variable does NOT change the value of the
+     SHELL environment variable given to programs invoked by make.  As
+     an enhancement to POSIX, if you export the make variable SHELL then
+     it will be set in the environment, just as before.
+
+* On DOS and MS Windows systems, explicitly setting SHELL to a pathname
+  ending in "cmd" or "cmd.exe" (case-insensitive) will force GNU make to
+  use the DOS command interpreter in batch mode even if a UNIX-like
+  shell could be found on the system.
+
+* Updated to autoconf 2.59, automake 1.8.2, and gettext 0.14.1.  Users
+  should not be impacted.
+
+* New translations for Swedish, Chinese (simplified), Ukrainian,
+  Belarusian, Finnish, Kinyarwandan, and Irish.  Many updated
+  translations.
+
+
+Version 3.80
+
+* A new feature exists: order-only prerequisites.  These prerequisites
+  affect the order in which targets are built, but they do not impact
+  the rebuild/no-rebuild decision of their dependents.  That is to say,
+  they allow you to require target B be built before target A, without
+  requiring that target A will always be rebuilt if target B is updated.
+  Patch for this feature provided by Greg McGary <greg@mcgary.org>.
+
+* For compatibility with SysV make, GNU make now supports the peculiar
+  syntax $$@, $$(@D), and $$(@F) in the prerequisites list of a rule.
+  This syntax is only valid within explicit and static pattern rules: it
+  cannot be used in implicit (suffix or pattern) rules.  Edouard G. Parmelan
+  <egp@free.fr> provided a patch implementing this feature; however, I
+  decided to implement it in a different way.
+
+* The argument to the "ifdef" conditional is now expanded before it's
+  tested, so it can be a constructed variable name.
+
+  Similarly, the arguments to "export" (when not used in a variable
+  definition context) and "unexport" are also now expanded.
+
+* A new function is defined: $(value ...).  The argument to this
+  function is the _name_ of a variable.  The result of the function is
+  the value of the variable, without having been expanded.
+
+* A new function is defined: $(eval ...).  The arguments to this
+  function should expand to makefile commands, which will then be
+  evaluated as if they had appeared in the makefile.  In combination
+  with define/endef multiline variable definitions this is an extremely
+  powerful capability.  The $(value ...) function is also sometimes
+  useful here.
+
+* A new built-in variable is defined, $(MAKEFILE_LIST).  It contains a
+  list of each makefile GNU make has read, or started to read, in the
+  order in which they were encountered.  So, the last filename in the
+  list when a makefile is just being read (before any includes) is the
+  name of the current makefile.
+
+* A new built-in variable is defined: $(.VARIABLES).  When it is
+  expanded it returns a complete list of variable names defined by all
+  makefiles at that moment.
+
+* A new command-line option is defined, -B or --always-make.  If
+  specified GNU make will consider all targets out-of-date even if they
+  would otherwise not be.
+
+* The arguments to $(call ...) functions were being stored in $1, $2,
+  etc. as recursive variables, even though they are fully expanded
+  before assignment.  This means that escaped dollar signs ($$ etc.)
+  were not behaving properly.  Now the arguments are stored as simple
+  variables.  This may mean that if you added extra escaping to your
+  $(call ...) function arguments you will need to undo it now.
+
+* The variable invoked by $(call ...) can now be recursive: unlike other
+  variables it can reference itself and this will not produce an error
+  when it is used as the first argument to $(call ...) (but only then).
+
+* New pseudo-target .LOW_RESOLUTION_TIME, superseding the configure
+  option --disable-nsec-timestamps.  You might need this if your build
+  process depends on tools like "cp -p" preserving time stamps, since
+  "cp -p" (right now) doesn't preserve the subsecond portion of a time
+  stamp.
+
+* Updated translations for French, Galician, German, Japanese, Korean,
+  and Russian.  New translations for Croatian, Danish, Hebrew, and
+  Turkish.
+
+* Updated internationalization support to Gettext 0.11.5.
+  GNU make now uses Gettext's "external" feature, and does not include
+  any internationalization code itself.  Configure will search your
+  system for an existing implementation of GNU Gettext (only GNU Gettext
+  is acceptable) and use it if it exists.  If not, NLS will be disabled.
+  See ABOUT-NLS for more information.
+
+* Updated to autoconf 2.54 and automake 1.7.  Users should not be impacted.
+
+Version 3.79.1
+
+* .SECONDARY with no prerequisites now prevents any target from being
+  removed because make thinks it's an intermediate file, not just those
+  listed in the makefile.
+
+* New configure option --disable-nsec-timestamps, but this was
+  superseded in later versions by the .LOW_RESOLUTION_TIME pseudo-target.
+
+Version 3.79
+
+* GNU make optionally supports internationalization and locales via the
+  GNU gettext (or local gettext if suitable) package.  See the ABOUT-NLS
+  file for more information on configuring GNU make for NLS.
+
+* Previously, GNU make quoted variables such as MAKEFLAGS and
+  MAKEOVERRIDES for proper parsing by the shell.  This allowed them to
+  be used within make build scripts.  However, using them there is not
+  proper behavior: they are meant to be passed to subshells via the
+  environment.  Unfortunately the values were not quoted properly to be
+  passed through the environment.  This meant that make didn't properly
+  pass some types of command line values to submakes.
+
+  With this version we change that behavior: now these variables are
+  quoted properly for passing through the environment, which is the
+  correct way to do it.  If you previously used these variables
+  explicitly within a make rule you may need to re-examine your use for
+  correctness given this change.
+
+* A new pseudo-target .NOTPARALLEL is available.  If defined, the
+  current makefile is run serially regardless of the value of -j.
+  However, submakes are still eligible for parallel execution.
+
+* The --debug option has changed: it now allows optional flags
+  controlling the amount and type of debugging output.  By default only
+  a minimal amount information is generated, displaying the names of
+  "normal" targets (not makefiles) that were deemed out of date and in
+  need of being rebuilt.
+
+  Note that the -d option behaves as before: it takes no arguments and
+  all debugging information is generated.
+
+* The `-p' (print database) output now includes filename and linenumber
+  information for variable definitions, to aid debugging.
+
+* The wordlist function no longer reverses its arguments if the "start"
+  value is greater than the "end" value.  If that's true, nothing is
+  returned.
+
+* Hartmut Becker provided many updates for the VMS port of GNU make.
+  See the readme.vms file for more details.
+
+Version 3.78
+
+* Two new functions, $(error ...) and $(warning ...) are available.  The
+  former will cause make to fail and exit immediately upon expansion of
+  the function, with the text provided as the error message.  The latter
+  causes the text provided to be printed as a warning message, but make
+  proceeds normally.
+
+* A new function $(call ...) is available.  This allows users to create
+  their own parameterized macros and invoke them later.  Original
+  implementation of this function was provided by Han-Wen Nienhuys
+  <hanwen@cs.uu.nl>.
+
+* A new function $(if ...) is available.  It provides if-then-else
+  capabilities in a builtin function.  Original implementation of this
+  function was provided by Han-Wen Nienhuys <hanwen@cs.uu.nl>.
+
+* Make defines a new variable, .LIBPATTERNS.  This variable controls how
+  library dependency expansion (dependencies like ``-lfoo'') is performed.
+
+* Make accepts CRLF sequences as well as traditional LF, for
+  compatibility with makefiles created on other operating systems.
+
+* Make accepts a new option: -R, or --no-builtin-variables.  This option
+  disables the definition of the rule-specific builtin variables (CC,
+  LD, AR, etc.).  Specifying this option forces -r (--no-builtin-rules)
+  as well.
+
+* A "job server" feature, suggested by Howard Chu <hyc@highlandsun.com>.
+
+  On systems that support POSIX pipe(2) semantics, GNU make can now pass
+  -jN options to submakes rather than forcing them all to use -j1.  The
+  top make and all its sub-make processes use a pipe to communicate with
+  each other to ensure that no more than N jobs are started across all
+  makes.  To get the old behavior of -j back, you can configure make
+  with the --disable-job-server option.
+
+* The confusing term "dependency" has been replaced by the more accurate
+  and standard term "prerequisite", both in the manual and in all GNU make
+  output.
+
+* GNU make supports the "big archive" library format introduced in AIX 4.3.
+
+* GNU make supports large files on AIX, HP-UX, and IRIX.  These changes
+  were provided by Paul Eggert <eggert@twinsun.com>.  (Large file
+  support for Solaris and Linux was introduced in 3.77, but the
+  configuration had issues: these have also been resolved).
+
+* The Windows 95/98/NT (W32) version of GNU make now has native support
+  for the Cygnus Cygwin release B20.1 shell (bash).
+
+* The GNU make regression test suite, long available separately "under
+  the table", has been integrated into the release.  You can invoke it
+  by running "make check" in the distribution.  Note that it requires
+  Perl (either Perl 4 or Perl 5) to run.
+
+Version 3.77
+
+* Implement BSD make's "?=" variable assignment operator.  The variable
+  is assigned the specified value only if that variable is not already
+  defined.
+
+* Make defines a new variable, "CURDIR", to contain the current working
+  directory (after the -C option, if any, has been processed).
+  Modifying this variable has no effect on the operation of make.
+
+* Make defines a new default RCS rule, for new-style master file
+  storage: ``% :: RCS/%'' (note no ``,v'' suffix).
+
+  Make defines new default rules for DOS-style C++ file naming
+  conventions, with ``.cpp'' suffixes.  All the same rules as for
+  ``.cc'' and ``.C'' suffixes are provided, along with LINK.cpp and
+  COMPILE.cpp macros (which default to the same value as LINK.cc and
+  COMPILE.cc).  Note CPPFLAGS is still C preprocessor flags!  You should
+  use CXXFLAGS to change C++ compiler flags.
+
+* A new feature, "target-specific variable values", has been added.
+  This is a large change so please see the appropriate sections of the
+  manual for full details.  Briefly, syntax like this:
+
+    TARGET: VARIABLE = VALUE
+
+  defines VARIABLE as VALUE within the context of TARGET.  This is
+  similar to SunOS make's "TARGET := VARIABLE = VALUE" feature.  Note
+  that the assignment may be of any type, not just recursive, and that
+  the override keyword is available.
+
+  COMPATIBILITY: This new syntax means that if you have any rules where
+  the first or second dependency has an equal sign (=) in its name,
+  you'll have to escape them with a backslash: "foo : bar\=baz".
+  Further, if you have any dependencies which already contain "\=",
+  you'll have to escape both of them: "foo : bar\\\=baz".
+
+* A new appendix listing the most common error and warning messages
+  generated by GNU make, with some explanation, has been added to the
+  GNU make User's Manual.
+
+* Updates to the GNU make Customs library support (see README.customs).
+
+* Updates to the Windows 95/NT port from Rob Tulloh (see README.W32),
+  and to the DOS port from Eli Zaretski (see README.DOS).
 
 Version 3.76.1
 
@@ -613,18 +939,11 @@ Version 3.05
 ----------------------------------------------------------------------
 Copyright information:
 
-Copyright (C) 1992, 1993, 1994, 1995, 1996 Free Software Foundation, Inc.
-
    Permission is granted to anyone to make or distribute verbatim copies
    of this document as received, in any medium, provided that the
-   copyright notice and this permission notice are preserved,
-   thus giving the recipient permission to redistribute in turn.
+   copyright notice and this permission notice are preserved, thus
+   giving the recipient permission to redistribute in turn.
 
-   Permission is granted to distribute modified versions
-   of this document, or of portions of it,
-   under the above conditions, provided also that they
-   carry prominent notices stating who last changed them.
-
-Local variables:
-version-control: never
-end:
+   Permission is granted to distribute modified versions of this
+   document, or of portions of it, under the above conditions, provided
+   also that they carry prominent notices stating who last changed them.

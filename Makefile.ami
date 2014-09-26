@@ -16,7 +16,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with GNU Make; see the file COPYING.  If not, write to
-# the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+# the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+# Boston, MA 02111-1307, USA.
 
 #
 #	Makefile for GNU Make
@@ -118,14 +119,14 @@ CTAGS = ctags -w
 
 objs = commands.o job.o dir.o file.o misc.o main.o read.o remake.o	\
        rule.o implicit.o default.o variable.o expand.o function.o	\
-       vpath.o version.o ar.o arscan.o signame.o remote-$(REMOTE).o     \
-       $(GETOPT) $(ALLOCA) $(extras)
+       vpath.o version.o ar.o arscan.o signame.o hash.o                 \
+       remote-$(REMOTE).o $(GETOPT) $(ALLOCA) $(extras)
 srcs = $(srcdir)commands.c $(srcdir)job.c $(srcdir)dir.c             \
        $(srcdir)file.c $(srcdir)getloadavg.c $(srcdir)misc.c         \
        $(srcdir)main.c $(srcdir)read.c $(srcdir)remake.c             \
        $(srcdir)rule.c $(srcdir)implicit.c $(srcdir)default.c        \
        $(srcdir)variable.c $(srcdir)expand.c $(srcdir)function.c     \
-       $(srcdir)vpath.c $(srcdir)version.c                            \
+       $(srcdir)vpath.c $(srcdir)version.c $(srcdir)hash.c           \
        $(srcdir)remote-$(REMOTE).c                                     \
        $(srcdir)ar.c $(srcdir)arscan.c                                \
        $(srcdir)signame.c $(srcdir)signame.h $(GETOPT_SRC)            \

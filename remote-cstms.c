@@ -18,17 +18,20 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with GNU Make; see the file COPYING.  If not, write to
-the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
+the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+Boston, MA 02111-1307, USA.  */
 
 #include "make.h"
+#include "job.h"
+#include "filedef.h"
 #include "commands.h"
 #include "job.h"
+#include "debug.h"
+
 #include <sys/time.h>
 #include <netdb.h>
 
-#define __STRICT_BSD__		/* Don't make conflicting declarations.  */
 #include "customs.h"
-
 
 char *remote_description = "Customs";
 
@@ -42,24 +45,45 @@ static ExportPermit permit;
 /* Normalized path name of the current directory.  */
 static char *normalized_cwd;
 
+/* Call once at startup even if no commands are run.  */
+
+void
+remote_setup (void)
+{
+}
+
+/* Called before exit.  */
+
+void
+remote_cleanup (void)
+{
+}
+
 /* Return nonzero if the next job should be done remotely.  */
 
 int
-start_remote_job_p ()
+start_remote_job_p (int first_p)
 {
   static int inited = 0;
   int status;
-
-  /* Allow the user to turn off job exportation
-     (useful while he is debugging Customs, for example).  */
-  if (getenv ("GNU_MAKE_NO_CUSTOMS") != 0)
-    return 0;
+  int njobs;
 
   if (!inited)
     {
+      /* Allow the user to turn off job exportation (useful while he is
+         debugging Customs, for example).  */
+      if (getenv ("GNU_MAKE_NO_CUSTOMS") != 0)
+        {
+          inited = -1;
+          return 0;
+        }
+
       /* For secure Customs, make is installed setuid root and
 	 Customs requires a privileged source port be used.  */
       make_access ();
+
+      if (ISDB (DB_JOBS))
+        Rpc_Debug(1);
 
       /* Ping the daemon once to see if it is there.  */
       inited = Customs_Ping () == RPC_SUCCESS ? 1 : -1;
@@ -87,11 +111,20 @@ start_remote_job_p ()
   if (inited < 0)
     return 0;
 
+  njobs = job_slots_used;
+  if (!first_p)
+    njobs -= 1;		/* correction for being called from reap_children() */
+
+  /* the first job should run locally, or, if the -l flag is given, we use
+     that as clue as to how many local jobs should be scheduled locally */
+  if (max_load_average < 0 && njobs == 0 || njobs < max_load_average)
+     return 0;
+
   status = Customs_Host (EXPORT_SAME, &permit);
   if (status != RPC_SUCCESS)
     {
-      if (debug_flag)
-	printf ("Customs won't export: %s\n", Rpc_ErrorMessage (status));
+      DB (DB_JOBS, (_("Customs won't export: %s\n"),
+                    Rpc_ErrorMessage (status)));
       return 0;
     }
 
@@ -106,15 +139,11 @@ start_remote_job_p ()
    if it is local (meaning *ID_PTR is a process ID).  */
 
 int
-start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
-     char **argv, **envp;
-     int stdin_fd;
-     int *is_remote;
-     int *id_ptr;
-     int *used_stdin;
+start_remote_job (char **argv, char **envp, int stdin_fd,
+                  int *is_remote, int *id_ptr, int *used_stdin)
 {
-  extern int vfork (), execve ();
   char waybill[MAX_DATA_SIZE], msg[128];
+  struct hostent *host;
   struct timeval timeout;
   struct sockaddr_in sin;
   int len;
@@ -126,7 +155,7 @@ start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
   retsock = Rpc_UdpCreate (True, 0);
   if (retsock < 0)
     {
-      error ("exporting: Couldn't create return socket.");
+      error (NILF, "exporting: Couldn't create return socket.");
       return 1;
     }
 
@@ -150,8 +179,8 @@ start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
   /* Modify the waybill as if the remote child had done `child_access ()'.  */
   {
     WayBill *wb = (WayBill *) waybill;
-    wb->euid = wb->ruid;
-    wb->rgid = wb->rgid;
+    wb->ruid = wb->euid;
+    wb->rgid = wb->egid;
   }
 
   /* Send the request to the server, timing out in 20 seconds.  */
@@ -164,26 +193,31 @@ start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
 		     len, (Rpc_Opaque) waybill,
 		     sizeof(msg), (Rpc_Opaque) msg,
 		     1, &timeout);
+
+  host = gethostbyaddr((char *)&permit.addr, sizeof(permit.addr), AF_INET);
+
   if (status != RPC_SUCCESS)
     {
       (void) close (retsock);
       (void) close (sock);
-      error ("exporting: %s", Rpc_ErrorMessage (status));
+      error (NILF, "exporting to %s: %s",
+             host ? host->h_name : inet_ntoa (permit.addr),
+             Rpc_ErrorMessage (status));
       return 1;
     }
   else if (msg[0] != 'O' || msg[1] != 'k' || msg[2] != '\0')
     {
       (void) close (retsock);
       (void) close (sock);
-      error ("CUSTOMS_IMPORT: %s", msg);
+      error (NILF, "exporting to %s: %s",
+             host ? host->h_name : inet_ntoa (permit.addr),
+             msg);
       return 1;
     }
-  else if (debug_flag)
+  else
     {
-      struct hostent *host = gethostbyaddr (&permit.addr, sizeof (permit.addr),
-					    AF_INET);
-      printf ("Job exported to %s ID %u\n",
-	      host == 0 ? inet_ntoa (permit.addr) : host->h_name,
+      error (NILF, "*** exported to %s (id %u)",
+	      host ? host->h_name : inet_ntoa (permit.addr),
 	      permit.id);
     }
 
@@ -225,6 +259,7 @@ start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
   (void) close (sock);
   *is_remote = 0;
   *id_ptr = pid;
+  *used_stdin = 1;
   return 0;
 }
 
@@ -235,9 +270,8 @@ start_remote_job (argv, envp, stdin_fd, is_remote, id_ptr, used_stdin)
    0 if we would have to block and !BLOCK, or < 0 if there were none.  */
 
 int
-remote_status (exit_code_ptr, signal_ptr, coredump_ptr, block)
-     int *exit_code_ptr, *signal_ptr, *coredump_ptr;
-     int block;
+remote_status (int *exit_code_ptr, int *signal_ptr, int *coredump_ptr,
+               int block)
 {
   return -1;
 }
@@ -246,7 +280,7 @@ remote_status (exit_code_ptr, signal_ptr, coredump_ptr, block)
    If this notification is done by raising the child termination
    signal, do not block that signal.  */
 void
-block_remote_children ()
+block_remote_children (void)
 {
   return;
 }
@@ -255,16 +289,14 @@ block_remote_children ()
    If this is done by raising the child termination signal,
    do not unblock that signal.  */
 void
-unblock_remote_children ()
+unblock_remote_children (void)
 {
   return;
 }
 
 /* Send signal SIG to child ID.  Return 0 if successful, -1 if not.  */
 int
-remote_kill (id, sig)
-     int id;
-     int sig;
+remote_kill (int id, int sig)
 {
   return -1;
 }

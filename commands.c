@@ -14,7 +14,8 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with GNU Make; see the file COPYING.  If not, write to
-the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
+the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+Boston, MA 02111-1307, USA.  */
 
 #include "make.h"
 #include "dep.h"
@@ -22,6 +23,12 @@ the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
 #include "variable.h"
 #include "job.h"
 #include "commands.h"
+
+#if VMS
+# define FILE_LIST_SEPARATOR ','
+#else
+# define FILE_LIST_SEPARATOR ' '
+#endif
 
 extern int remote_kill PARAMS ((int id, int sig));
 
@@ -31,11 +38,10 @@ extern int getpid ();
 
 /* Set FILE's automatic variables up.  */
 
-static void
-set_file_variables (file)
-     register struct file *file;
+void
+set_file_variables (struct file *file)
 {
-  register char *p;
+  struct dep *d;
   char *at, *percent, *star, *less;
 
 #ifndef	NO_ARCHIVES
@@ -45,7 +51,9 @@ set_file_variables (file)
   if (ar_name (file->name))
     {
       unsigned int len;
-      p = index (file->name, '(');
+      char *p;
+
+      p = strchr (file->name, '(');
       at = (char *) alloca (p - file->name + 1);
       bcopy (file->name, at, p - file->name);
       at[p - file->name] = '\0';
@@ -74,7 +82,7 @@ set_file_variables (file)
 #ifndef	NO_ARCHIVES
       if (ar_name (file->name))
 	{
-	  name = index (file->name, '(') + 1;
+	  name = strchr (file->name, '(') + 1;
 	  len = strlen (name) - 1;
 	}
       else
@@ -87,7 +95,7 @@ set_file_variables (file)
       for (d = enter_file (".SUFFIXES")->deps; d != 0; d = d->next)
 	{
 	  unsigned int slen = strlen (dep_name (d));
-	  if (len > slen && !strncmp (dep_name (d), name + (len - slen), slen))
+	  if (len > slen && strneq (dep_name (d), name + (len - slen), slen))
 	    {
 	      file->stem = savestring (name, len - slen);
 	      break;
@@ -98,8 +106,14 @@ set_file_variables (file)
     }
   star = file->stem;
 
-  /* $< is the first dependency.  */
-  less = file->deps != 0 ? dep_name (file->deps) : "";
+  /* $< is the first not order-only dependency.  */
+  less = "";
+  for (d = file->deps; d != 0; d = d->next)
+    if (!d->ignore_mtime)
+      {
+        less = dep_name (d);
+        break;
+      }
 
   if (file->cmds == default_file->cmds)
     /* This file got its commands from .DEFAULT.
@@ -107,7 +121,7 @@ set_file_variables (file)
     less = at;
 
 #define	DEFINE_VARIABLE(name, len, value) \
-  (void) define_variable_for_file (name, len, value, o_automatic, 0, file)
+  (void) define_variable_for_file (name,len,value,o_automatic,0,file)
 
   /* Define the variables.  */
 
@@ -116,15 +130,17 @@ set_file_variables (file)
   DEFINE_VARIABLE ("@", 1, at);
   DEFINE_VARIABLE ("%", 1, percent);
 
-  /* Compute the values for $^, $+, and $?.  */
+  /* Compute the values for $^, $+, $?, and $|.  */
 
   {
-    register unsigned int qmark_len, plus_len;
-    char *caret_value, *plus_value;
-    register char *cp;
-    char *qmark_value;
-    register char *qp;
-    register struct dep *d;
+    static char *plus_value=0, *bar_value=0, *qmark_value=0;
+    static unsigned int qmark_max=0, plus_max=0, bar_max=0;
+
+    unsigned int qmark_len, plus_len, bar_len;
+    char *cp;
+    char *caret_value;
+    char *qp;
+    char *bp;
     unsigned int len;
 
     /* Compute first the value for $+, which is supposed to contain
@@ -132,36 +148,37 @@ set_file_variables (file)
 
     plus_len = 0;
     for (d = file->deps; d != 0; d = d->next)
-      plus_len += strlen (dep_name (d)) + 1;
+      if (! d->ignore_mtime)
+	plus_len += strlen (dep_name (d)) + 1;
+    if (plus_len == 0)
+      plus_len++;
 
-    len = plus_len == 0 ? 1 : plus_len;
-    cp = plus_value = (char *) alloca (len);
+    if (plus_len > plus_max)
+      plus_value = (char *) xmalloc (plus_max = plus_len);
+    cp = plus_value;
 
-    qmark_len = plus_len;	/* Will be this or less.  */
+    qmark_len = plus_len + 1;	/* Will be this or less.  */
     for (d = file->deps; d != 0; d = d->next)
-      {
-	char *c = dep_name (d);
+      if (! d->ignore_mtime)
+        {
+          char *c = dep_name (d);
 
 #ifndef	NO_ARCHIVES
-	if (ar_name (c))
-	  {
-	    c = index (c, '(') + 1;
-	    len = strlen (c) - 1;
-	  }
-	else
+          if (ar_name (c))
+            {
+              c = strchr (c, '(') + 1;
+              len = strlen (c) - 1;
+            }
+          else
 #endif
-	  len = strlen (c);
+            len = strlen (c);
 
-	bcopy (c, cp, len);
-	cp += len;
-#if VMS
-        *cp++ = ',';
-#else
-	*cp++ = ' ';
-#endif
-	if (! d->changed)
-	  qmark_len -= len + 1;	/* Don't space in $? for this one.  */
-      }
+          bcopy (c, cp, len);
+          cp += len;
+          *cp++ = FILE_LIST_SEPARATOR;
+          if (! d->changed)
+            qmark_len -= len + 1;	/* Don't space in $? for this one.  */
+        }
 
     /* Kill the last space and define the variable.  */
 
@@ -174,11 +191,24 @@ set_file_variables (file)
 
     uniquize_deps (file->deps);
 
-    /* Compute the values for $^ and $?.  */
+    bar_len = 0;
+    for (d = file->deps; d != 0; d = d->next)
+      if (d->ignore_mtime)
+	bar_len += strlen (dep_name (d)) + 1;
+    if (bar_len == 0)
+      bar_len++;
+
+    /* Compute the values for $^, $?, and $|.  */
 
     cp = caret_value = plus_value; /* Reuse the buffer; it's big enough.  */
-    len = qmark_len == 0 ? 1 : qmark_len;
-    qp = qmark_value = (char *) alloca (len);
+
+    if (qmark_len > qmark_max)
+      qmark_value = (char *) xmalloc (qmark_max = qmark_len);
+    qp = qmark_value;
+
+    if (bar_len > bar_max)
+      bar_value = (char *) xmalloc (bar_max = bar_len);
+    bp = bar_value;
 
     for (d = file->deps; d != 0; d = d->next)
       {
@@ -187,30 +217,31 @@ set_file_variables (file)
 #ifndef	NO_ARCHIVES
 	if (ar_name (c))
 	  {
-	    c = index (c, '(') + 1;
+	    c = strchr (c, '(') + 1;
 	    len = strlen (c) - 1;
 	  }
 	else
 #endif
 	  len = strlen (c);
 
-	bcopy (c, cp, len);
-	cp += len;
-#if VMS
-	*cp++ = ',';
-#else
-	*cp++ = ' ';
-#endif
-	if (d->changed)
-	  {
-	    bcopy (c, qp, len);
-	    qp += len;
-#if VMS
-	    *qp++ = ',';
-#else
-	    *qp++ = ' ';
-#endif
+        if (d->ignore_mtime)
+          {
+	    bcopy (c, bp, len);
+	    bp += len;
+	    *bp++ = FILE_LIST_SEPARATOR;
 	  }
+	else
+	  {
+            bcopy (c, cp, len);
+            cp += len;
+            *cp++ = FILE_LIST_SEPARATOR;
+            if (d->changed)
+              {
+                bcopy (c, qp, len);
+                qp += len;
+                *qp++ = FILE_LIST_SEPARATOR;
+              }
+          }
       }
 
     /* Kill the last spaces and define the variables.  */
@@ -220,105 +251,109 @@ set_file_variables (file)
 
     qp[qp > qmark_value ? -1 : 0] = '\0';
     DEFINE_VARIABLE ("?", 1, qmark_value);
+
+    bp[bp > bar_value ? -1 : 0] = '\0';
+    DEFINE_VARIABLE ("|", 1, bar_value);
   }
 
 #undef	DEFINE_VARIABLE
 }
 
 /* Chop CMDS up into individual command lines if necessary.
-   Also set the `lines_flag' and `any_recurse' members.  */
+   Also set the `lines_flags' and `any_recurse' members.  */
 
 void
-chop_commands (cmds)
-     register struct commands *cmds;
+chop_commands (struct commands *cmds)
 {
-  if (cmds != 0 && cmds->command_lines == 0)
-    {
-      /* Chop CMDS->commands up into lines in CMDS->command_lines.
+  register char *p;
+  unsigned int nlines, idx;
+  char **lines;
+
+  /* If we don't have any commands,
+     or we already parsed them, never mind.  */
+
+  if (!cmds || cmds->command_lines != 0)
+    return;
+
+  /* Chop CMDS->commands up into lines in CMDS->command_lines.
 	 Also set the corresponding CMDS->lines_flags elements,
 	 and the CMDS->any_recurse flag.  */
-      register char *p;
-      unsigned int nlines, idx;
-      char **lines;
 
-      nlines = 5;
-      lines = (char **) xmalloc (5 * sizeof (char *));
-      idx = 0;
-      p = cmds->commands;
-      while (*p != '\0')
-	{
-	  char *end = p;
-	find_end:;
-	  end = index (end, '\n');
-	  if (end == 0)
-	    end = p + strlen (p);
-	  else if (end > p && end[-1] == '\\')
-	    {
-	      int backslash = 1;
-	      register char *b;
-	      for (b = end - 2; b >= p && *b == '\\'; --b)
-		backslash = !backslash;
-	      if (backslash)
-		{
-		  ++end;
-		  goto find_end;
-		}
-	    }
+  nlines = 5;
+  lines = (char **) xmalloc (5 * sizeof (char *));
+  idx = 0;
+  p = cmds->commands;
+  while (*p != '\0')
+    {
+      char *end = p;
+    find_end:;
+      end = strchr (end, '\n');
+      if (end == 0)
+        end = p + strlen (p);
+      else if (end > p && end[-1] == '\\')
+        {
+          int backslash = 1;
+          register char *b;
+          for (b = end - 2; b >= p && *b == '\\'; --b)
+            backslash = !backslash;
+          if (backslash)
+            {
+              ++end;
+              goto find_end;
+            }
+        }
 
-	  if (idx == nlines)
-	    {
-	      nlines += 2;
-	      lines = (char **) xrealloc ((char *) lines,
-					  nlines * sizeof (char *));
-	    }
-	  lines[idx++] = savestring (p, end - p);
-	  p = end;
-	  if (*p != '\0')
-	    ++p;
-	}
+      if (idx == nlines)
+        {
+          nlines += 2;
+          lines = (char **) xrealloc ((char *) lines,
+                                      nlines * sizeof (char *));
+        }
+      lines[idx++] = savestring (p, end - p);
+      p = end;
+      if (*p != '\0')
+        ++p;
+    }
 
-      if (idx != nlines)
-	{
-	  nlines = idx;
-	  lines = (char **) xrealloc ((char *) lines,
-				      nlines * sizeof (char *));
-	}
+  if (idx != nlines)
+    {
+      nlines = idx;
+      lines = (char **) xrealloc ((char *) lines,
+                                  nlines * sizeof (char *));
+    }
 
-      cmds->ncommand_lines = nlines;
-      cmds->command_lines = lines;
+  cmds->ncommand_lines = nlines;
+  cmds->command_lines = lines;
 
-      cmds->any_recurse = 0;
-      cmds->lines_flags = (char *) xmalloc (nlines);
-      for (idx = 0; idx < nlines; ++idx)
-	{
-	  int flags = 0;
+  cmds->any_recurse = 0;
+  cmds->lines_flags = (char *) xmalloc (nlines);
+  for (idx = 0; idx < nlines; ++idx)
+    {
+      int flags = 0;
 
-	  for (p = lines[idx];
-	       isblank (*p) || *p == '-' || *p == '@' || *p == '+';
-	       ++p)
-	    switch (*p)
-	      {
-	      case '+':
-		flags |= COMMANDS_RECURSE;
-		break;
-	      case '@':
-		flags |= COMMANDS_SILENT;
-		break;
-	      case '-':
-		flags |= COMMANDS_NOERROR;
-		break;
-	      }
-	  if (!(flags & COMMANDS_RECURSE))
-	    {
-	      unsigned int len = strlen (p);
-	      if (sindex (p, len, "$(MAKE)", 7) != 0
-		  || sindex (p, len, "${MAKE}", 7) != 0)
-		flags |= COMMANDS_RECURSE;
-	    }
+      for (p = lines[idx];
+           isblank ((unsigned char)*p) || *p == '-' || *p == '@' || *p == '+';
+           ++p)
+        switch (*p)
+          {
+          case '+':
+            flags |= COMMANDS_RECURSE;
+            break;
+          case '@':
+            flags |= COMMANDS_SILENT;
+            break;
+          case '-':
+            flags |= COMMANDS_NOERROR;
+            break;
+          }
 
-	  cmds->lines_flags[idx] = flags;
-	  cmds->any_recurse |= flags & COMMANDS_RECURSE;
-	}
+      /* If no explicit '+' was given, look for MAKE variable references.  */
+      if (!(flags & COMMANDS_RECURSE)
+          && (strstr (p, "$(MAKE)") != 0 || strstr (p, "${MAKE}") != 0))
+        flags |= COMMANDS_RECURSE;
+
+      cmds->lines_flags[idx] = flags;
+      cmds->any_recurse |= flags & COMMANDS_RECURSE;
     }
 }
 
@@ -327,8 +362,7 @@ chop_commands (cmds)
    fork off a child process to run the first command line in the sequence.  */
 
 void
-execute_file_commands (file)
-     struct file *file;
+execute_file_commands (struct file *file)
 {
   register char *p;
 
@@ -336,13 +370,12 @@ execute_file_commands (file)
      the commands are nothing but whitespace.  */
 
   for (p = file->cmds->commands; *p != '\0'; ++p)
-    if (!isspace (*p) && *p != '-' && *p != '@')
+    if (!isspace ((unsigned char)*p) && *p != '-' && *p != '@')
       break;
   if (*p == '\0')
     {
-      /* We are all out of commands.
-	 If we have gotten this far, all the previous commands
-	 have run successfully, so we have winning update status.  */
+      /* If there are no commands, assume everything worked.  */
+      set_command_state (file, cs_running);
       file->update_status = 0;
       notice_finished_file (file);
       return;
@@ -350,7 +383,7 @@ execute_file_commands (file)
 
   /* First set the automatic variables according to this file.  */
 
-  initialize_file_variables (file);
+  initialize_file_variables (file, 0);
 
   set_file_variables (file);
 
@@ -366,8 +399,7 @@ int handling_fatal_signal = 0;
 /* Handle fatal signals.  */
 
 RETSIGTYPE
-fatal_error_signal (sig)
-     int sig;
+fatal_error_signal (int sig)
 {
 #ifdef __MSDOS__
   extern int dos_status, dos_command_running;
@@ -379,12 +411,12 @@ fatal_error_signal (sig)
       return;
     }
   remove_intermediates (1);
-  exit (1);
+  exit (EXIT_FAILURE);
 #else /* not __MSDOS__ */
 #ifdef _AMIGA
   remove_intermediates (1);
   if (sig == SIGINT)
-     fputs ("*** Break.\n", stderr);
+     fputs (_("*** Break.\n"), stderr);
 
   exit (10);
 #else /* not Amiga */
@@ -430,16 +462,8 @@ fatal_error_signal (sig)
 
       /* Clean up the children.  We don't just use the call below because
 	 we don't want to print the "Waiting for children" message.  */
-
-#ifndef __EMX__
-      /* Under emx, when make is aborted by the user, it seems to happen 
-	 that childs are already terminated as well, without the parent
-	 being notified. To avoid an endless loop, we simply don't do 
-	 that. In most cases, the OS/2 command line interpreter waits
-	 for any childs anyway. */
       while (job_slots_used > 0)
 	reap_children (1, 0);
-#endif
     }
   else
     /* Wait for our children to die.  */
@@ -457,14 +481,15 @@ fatal_error_signal (sig)
     exit (EXIT_FAILURE);
 #endif
 
-#ifdef __EMX__
+#ifdef WINDOWS32
+  /* Cannot call W32_kill with a pid (it needs a handle) */
   exit (EXIT_FAILURE);
-#endif
-
+#else
   /* Signal the same code; this time it will really be fatal.  The signal
      will be unblocked when we return and arrive then to kill us.  */
   if (kill (getpid (), sig) < 0)
     pfatal_with_name ("kill");
+#endif /* not WINDOWS32 */
 #endif /* not Amiga */
 #endif /* not __MSDOS__  */
 }
@@ -473,11 +498,10 @@ fatal_error_signal (sig)
    and it has changed on disk since we last stat'd it.  */
 
 static void
-delete_target (file, on_behalf_of)
-     struct file *file;
-     char *on_behalf_of;
+delete_target (struct file *file, char *on_behalf_of)
 {
   struct stat st;
+  int e;
 
   if (file->precious || file->phony)
     return;
@@ -485,27 +509,31 @@ delete_target (file, on_behalf_of)
 #ifndef NO_ARCHIVES
   if (ar_name (file->name))
     {
-      if (ar_member_date (file->name) != file->last_mtime)
+      time_t file_date = (file->last_mtime == NONEXISTENT_MTIME
+			  ? (time_t) -1
+			  : (time_t) FILE_TIMESTAMP_S (file->last_mtime));
+      if (ar_member_date (file->name) != file_date)
 	{
 	  if (on_behalf_of)
-	    error ("*** [%s] Archive member `%s' may be bogus; not deleted",
+	    error (NILF, _("*** [%s] Archive member `%s' may be bogus; not deleted"),
 		   on_behalf_of, file->name);
 	  else
-	    error ("*** Archive member `%s' may be bogus; not deleted",
+	    error (NILF, _("*** Archive member `%s' may be bogus; not deleted"),
 		   file->name);
 	}
       return;
     }
 #endif
 
-  if (stat (file->name, &st) == 0
+  EINTRLOOP (e, stat (file->name, &st));
+  if (e == 0
       && S_ISREG (st.st_mode)
-      && (time_t) st.st_mtime != file->last_mtime)
+      && FILE_TIMESTAMP_STAT_MODTIME (file->name, st) != file->last_mtime)
     {
       if (on_behalf_of)
-	error ("*** [%s] Deleting file `%s'", on_behalf_of, file->name);
+	error (NILF, _("*** [%s] Deleting file `%s'"), on_behalf_of, file->name);
       else
-	error ("*** Deleting file `%s'", file->name);
+	error (NILF, _("*** Deleting file `%s'"), file->name);
       if (unlink (file->name) < 0
 	  && errno != ENOENT)	/* It disappeared; so what.  */
 	perror_with_name ("unlink: ", file->name);
@@ -517,8 +545,7 @@ delete_target (file, on_behalf_of)
    Set the flag in CHILD to say they've been deleted.  */
 
 void
-delete_child_targets (child)
-     struct child *child;
+delete_child_targets (struct child *child)
 {
   struct dep *d;
 
@@ -538,27 +565,27 @@ delete_child_targets (child)
 /* Print out the commands in CMDS.  */
 
 void
-print_commands (cmds)
-     register struct commands *cmds;
+print_commands (struct commands *cmds)
 {
   register char *s;
 
-  fputs ("#  commands to execute", stdout);
+  fputs (_("#  commands to execute"), stdout);
 
-  if (cmds->filename == 0)
-    puts (" (built-in):");
+  if (cmds->fileinfo.filenm == 0)
+    puts (_(" (built-in):"));
   else
-    printf (" (from `%s', line %u):\n", cmds->filename, cmds->lineno);
+    printf (_(" (from `%s', line %lu):\n"),
+            cmds->fileinfo.filenm, cmds->fileinfo.lineno);
 
   s = cmds->commands;
   while (*s != '\0')
     {
       char *end;
 
-      while (isspace (*s))
+      while (isspace ((unsigned char)*s))
 	++s;
 
-      end = index (s, '\n');
+      end = strchr (s, '\n');
       if (end == 0)
 	end = s + strlen (s);
 

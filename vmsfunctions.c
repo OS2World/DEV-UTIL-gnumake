@@ -1,8 +1,9 @@
-#define KDEBUG 0
 /* vmsfunctions.c */
 
-#include <stdio.h>
 #include "make.h"
+#include "debug.h"
+#include "job.h"
+
 #ifdef __DECC
 #include <starlet.h>
 #endif
@@ -13,143 +14,150 @@
 #include <fibdef.h>
 #include "vmsdir.h"
 
-DIR *opendir(char *dspec)
+#ifdef HAVE_VMSDIR_H
+
+DIR *
+opendir (char *dspec)
 {
-  static struct FAB *dfab;
-  struct NAM *dnam;
-  char *searchspec;
+  struct DIR *dir  = (struct DIR *)xmalloc (sizeof (struct DIR));
+  struct NAM *dnam = (struct NAM *)xmalloc (sizeof (struct NAM));
+  struct FAB *dfab = &dir->fab;
+  char *searchspec = (char *)xmalloc (MAXNAMLEN + 1);
 
-  if ((dfab = (struct FAB *)xmalloc(sizeof (struct FAB))) == NULL) {
-    printf("Error mallocing for FAB\n");
-    return(NULL);
-  }
-  if ((dnam = (struct NAM *)xmalloc(sizeof (struct NAM))) == NULL) {
-    printf("Error mallocing for NAM\n");
-    free(dfab);
-    return(NULL);
-  }
-  if ((searchspec = (char *)xmalloc(MAXNAMLEN+1)) == NULL) {
-    printf("Error mallocing for searchspec\n");
-    free(dfab);
-    free(dnam);
-    return(NULL);
-  }
-
-  sprintf(searchspec,"%s*.*;",dspec);
+  memset (dir, 0, sizeof *dir);
 
   *dfab = cc$rms_fab;
+  *dnam = cc$rms_nam;
+  sprintf (searchspec, "%s*.*;", dspec);
+
   dfab->fab$l_fna = searchspec;
-  dfab->fab$b_fns = strlen(searchspec);
+  dfab->fab$b_fns = strlen (searchspec);
   dfab->fab$l_nam = dnam;
 
   *dnam = cc$rms_nam;
   dnam->nam$l_esa = searchspec;
   dnam->nam$b_ess = MAXNAMLEN;
 
-  if (!(sys$parse(dfab) & 1)) {
-    free(dfab);
-    free(dnam);
-    free(searchspec);
-    return(NULL);
-  }
+  if (! (sys$parse (dfab) & 1))
+    {
+      free (dir);
+      free (dnam);
+      free (searchspec);
+      return (NULL);
+    }
 
-  return(dfab);
+  return dir;
 }
 
-#include <ctype.h>
-#define uppercasify(str) { char *tmp; for(tmp = (str); *tmp != '\0'; tmp++) if(islower(*tmp)) *tmp = toupper(*tmp); }
+#define uppercasify(str) \
+  do \
+    { \
+      char *tmp; \
+      for (tmp = (str); *tmp != '\0'; tmp++) \
+        if (islower ((unsigned char)*tmp)) \
+          *tmp = toupper ((unsigned char)*tmp); \
+    } \
+  while (0)
 
-struct direct *readdir(DIR *dfd)
+struct direct *
+readdir (DIR *dir)
 {
-  static struct direct *dentry;
-  static char resultspec[MAXNAMLEN+1];
+  struct FAB *dfab = &dir->fab;
+  struct NAM *dnam = (struct NAM *)(dfab->fab$l_nam);
+  struct direct *dentry = &dir->dir;
   int i;
 
-  if ((dentry = (struct direct *)xmalloc(sizeof (struct direct))) == NULL) {
-    printf("Error mallocing for direct\n");
-    return(NULL);
-  }
+  memset (dentry, 0, sizeof *dentry);
 
-  dfd->fab$l_nam->nam$l_rsa = resultspec;
-  dfd->fab$l_nam->nam$b_rss = MAXNAMLEN;
+  dnam->nam$l_rsa = dir->d_result;
+  dnam->nam$b_rss = MAXNAMLEN;
 
-  if (debug_flag)
-    printf(".");
+  DB (DB_VERBOSE, ("."));
 
-  if (!((i = sys$search(dfd)) & 1)) {
-    if (debug_flag)
-      printf("sys$search failed with %d\n", i);
-    free(dentry);
-    return(NULL);
-  }
+  if (!((i = sys$search (dfab)) & 1))
+    {
+      DB (DB_VERBOSE, (_("sys$search failed with %d\n"), i));
+      return (NULL);
+    }
 
   dentry->d_off = 0;
-  if (dfd->fab$l_nam->nam$w_fid == 0)
+  if (dnam->nam$w_fid == 0)
     dentry->d_fileno = 1;
-  else dentry->d_fileno = dfd->fab$l_nam->nam$w_fid[0]
-			 +dfd->fab$l_nam->nam$w_fid[1]<<16;
-  dentry->d_reclen = sizeof (struct direct);
-/*
-  if (!strcmp(dfd->fab$l_nam->nam$l_type,".DIR"))
-    dentry->d_namlen = dfd->fab$l_nam->nam$b_name;
   else
-*/
-    dentry->d_namlen = dfd->fab$l_nam->nam$b_name+dfd->fab$l_nam->nam$b_type;
-  strncpy(dentry->d_name,dfd->fab$l_nam->nam$l_name,dentry->d_namlen);
+    dentry->d_fileno = dnam->nam$w_fid[0] + (dnam->nam$w_fid[1] << 16);
+
+  dentry->d_reclen = sizeof (struct direct);
+  dentry->d_namlen = dnam->nam$b_name + dnam->nam$b_type;
+  strncpy (dentry->d_name, dnam->nam$l_name, dentry->d_namlen);
   dentry->d_name[dentry->d_namlen] = '\0';
-  uppercasify(dentry->d_name);
-/*  uvUnFixRCSSeparator(dentry->d_name);*/
+  uppercasify (dentry->d_name);
 
-  return(dentry);
-}
-
-closedir(DIR *dfd)
-{
-  if (dfd != NULL) {
-    if (dfd->fab$l_nam != NULL)
-      free(dfd->fab$l_nam->nam$l_esa);
-    free(dfd->fab$l_nam);
-    free(dfd);
-  }
-}
-
-char *getwd(char *cwd)
-{
-  static char buf[512];
-
-    if (cwd)
-      return(getcwd(cwd,512));
-    else
-      return(getcwd(buf,512));
+  return (dentry);
 }
 
 int
-vms_stat (name, buf)
-     char *name;
-     struct stat *buf;
+closedir (DIR *dir)
+{
+  if (dir != NULL)
+    {
+      struct FAB *dfab = &dir->fab;
+      struct NAM *dnam = (struct NAM *)(dfab->fab$l_nam);
+      if (dnam != NULL)
+	free (dnam->nam$l_esa);
+      free (dnam);
+      free (dir);
+    }
+
+  return 0;
+}
+#endif /* compiled for OpenVMS prior to V7.x */
+
+char *
+getwd (char *cwd)
+{
+  static char buf[512];
+
+  if (cwd)
+    return (getcwd (cwd, 512));
+  else
+    return (getcwd (buf, 512));
+}
+
+int
+vms_stat (char *name, struct stat *buf)
 {
   int status;
   int i;
 
   static struct FAB Fab;
   static struct NAM Nam;
-  static struct fibdef Fib; /* short fib */
+  static struct fibdef Fib;	/* short fib */
   static struct dsc$descriptor FibDesc =
-    {sizeof(Fib), DSC$K_DTYPE_Z, DSC$K_CLASS_S, (char *)&Fib};
+  { sizeof (Fib), DSC$K_DTYPE_Z, DSC$K_CLASS_S, (char *) &Fib };
   static struct dsc$descriptor_s DevDesc =
-    {0, DSC$K_DTYPE_T, DSC$K_CLASS_S, &Nam.nam$t_dvi[1]};
+  { 0, DSC$K_DTYPE_T, DSC$K_CLASS_S, &Nam.nam$t_dvi[1] };
   static char EName[NAM$C_MAXRSS];
   static char RName[NAM$C_MAXRSS];
   static struct dsc$descriptor_s FileName =
-    {0, DSC$K_DTYPE_T, DSC$K_CLASS_S, 0};
+  { 0, DSC$K_DTYPE_T, DSC$K_CLASS_S, 0 };
   static struct dsc$descriptor_s string =
-    {0, DSC$K_DTYPE_T, DSC$K_CLASS_S, 0};  
+  { 0, DSC$K_DTYPE_T, DSC$K_CLASS_S, 0 };
   static unsigned long Rdate[2];
   static unsigned long Cdate[2];
-  static struct atrdef Atr[] = {  
-    {sizeof(Rdate),ATR$C_REVDATE,&Rdate[0]}, /* Revision date */
-    {sizeof(Cdate),ATR$C_CREDATE,&Cdate[0]}, /* Creation date */
-    {0,0,0}
+  static struct atrdef Atr[] =
+  {
+#if defined(VAX)
+    /* Revision date */
+    { sizeof (Rdate), ATR$C_REVDATE, (unsigned int) &Rdate[0] },
+    /* Creation date */
+    { sizeof (Cdate), ATR$C_CREDATE, (unsigned int) &Cdate[0] },
+#else
+    /* Revision date */
+    { sizeof (Rdate), ATR$C_REVDATE, &Rdate[0] },
+    /* Creation date */
+    { sizeof (Cdate), ATR$C_CREDATE, &Cdate[0]},
+#endif
+    { 0, 0, 0 }
   };
   static short int DevChan;
   static short int iosb[4];
@@ -158,43 +166,43 @@ vms_stat (name, buf)
 
   /* initialize RMS structures, we need a NAM to retrieve the FID */
   Fab = cc$rms_fab;
-  Fab.fab$l_fna = name ; /* name of file */
-  Fab.fab$b_fns = strlen(name);
-  Fab.fab$l_nam = &Nam; /* FAB has an associated NAM */
-      
+  Fab.fab$l_fna = name;		/* name of file */
+  Fab.fab$b_fns = strlen (name);
+  Fab.fab$l_nam = &Nam;		/* FAB has an associated NAM */
+
   Nam = cc$rms_nam;
-  Nam.nam$l_esa = EName; /* expanded filename */
-  Nam.nam$b_ess = sizeof(EName);
-  Nam.nam$l_rsa = RName; /* resultant filename */
-  Nam.nam$b_rss = sizeof(RName);
+  Nam.nam$l_esa = EName;	/* expanded filename */
+  Nam.nam$b_ess = sizeof (EName);
+  Nam.nam$l_rsa = RName;	/* resultant filename */
+  Nam.nam$b_rss = sizeof (RName);
 
   /* do $PARSE and $SEARCH here */
-  status = sys$parse(&Fab);
+  status = sys$parse (&Fab);
   if (!(status & 1))
     return -1;
 
   DevDesc.dsc$w_length = Nam.nam$t_dvi[0];
-  status = sys$assign(&DevDesc,&DevChan,0,0);
+  status = sys$assign (&DevDesc, &DevChan, 0, 0);
   if (!(status & 1))
     return -1;
 
   FileName.dsc$a_pointer = Nam.nam$l_name;
-  FileName.dsc$w_length = Nam.nam$b_name+Nam.nam$b_type+Nam.nam$b_ver;
-  
+  FileName.dsc$w_length = Nam.nam$b_name + Nam.nam$b_type + Nam.nam$b_ver;
+
   /* Initialize the FIB */
-  for (i=0;i<3;i++)
+  for (i = 0; i < 3; i++)
     {
-#if __DECC
-      Fib.fib$w_fid[i]=Nam.nam$w_fid[i];
-      Fib.fib$w_did[i]=Nam.nam$w_did[i];
+#ifndef __VAXC
+      Fib.fib$w_fid[i] = Nam.nam$w_fid[i];
+      Fib.fib$w_did[i] = Nam.nam$w_did[i];
 #else
-      Fib.fib$r_fid_overlay.fib$w_fid[i]=Nam.nam$w_fid[i];
-      Fib.fib$r_did_overlay.fib$w_did[i]=Nam.nam$w_did[i];
+      Fib.fib$r_fid_overlay.fib$w_fid[i] = Nam.nam$w_fid[i];
+      Fib.fib$r_did_overlay.fib$w_did[i] = Nam.nam$w_did[i];
 #endif
     }
 
-  status = sys$qiow(0,DevChan,IO$_ACCESS,&iosb,0,0,
-                        &FibDesc,&FileName,0,0,&Atr,0);
+  status = sys$qiow (0, DevChan, IO$_ACCESS, &iosb, 0, 0,
+		     &FibDesc, &FileName, 0, 0, &Atr, 0);
   sys$dassgn (DevChan);
   if (!(status & 1))
     return -1;
@@ -206,30 +214,40 @@ vms_stat (name, buf)
   if (status)
     return -1;
 
-  buf->st_mtime = ((Rdate[0]>>24) & 0xff) + ((Rdate[1]<<8) & 0xffffff00);
-  buf->st_ctime = ((Cdate[0]>>24) & 0xff) + ((Cdate[1]<<8) & 0xffffff00);
+  buf->st_mtime = ((Rdate[0] >> 24) & 0xff) + ((Rdate[1] << 8) & 0xffffff00);
+  buf->st_ctime = ((Cdate[0] >> 24) & 0xff) + ((Cdate[1] << 8) & 0xffffff00);
+
   return 0;
 }
 
 char *
-cvt_time(tval)
-  unsigned long tval;
+cvt_time (unsigned long tval)
 {
   static long int date[2];
   static char str[27];
   static struct dsc$descriptor date_str =
-    {26, DSC$K_DTYPE_T, DSC$K_CLASS_S, str};
+  { 26, DSC$K_DTYPE_T, DSC$K_CLASS_S, str };
 
   date[0] = (tval & 0xff) << 24;
-  date[1] = ((tval>>8) & 0xffffff);
+  date[1] = ((tval >> 8) & 0xffffff);
 
-  if ((date[0]==0) && (date[1]==0))
-    return("never");
- 
-  sys$asctim(0,&date_str,date,0);
-  str[26]='\0';
+  if ((date[0] == 0) && (date[1] == 0))
+    return ("never");
 
-  return(str);
+  sys$asctim (0, &date_str, date, 0);
+  str[26] = '\0';
+
+  return (str);
 }
-  
-/* EOF */
+
+int
+strcmpi (const char *s1, const char *s2)
+{
+  while (*s1 != '\0' && toupper(*s1) == toupper(*s2))
+    {
+      s1++;
+      s2++;
+    }
+
+  return toupper(*(unsigned char *) s1) - toupper(*(unsigned char *) s2);
+}

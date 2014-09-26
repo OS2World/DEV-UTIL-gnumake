@@ -6,8 +6,10 @@
 #include "sub_proc.h"
 #include "proc.h"
 #include "w32err.h"
+#include "config.h"
+#include "debug.h"
 
-static char *make_command_line( char *shell_name, char *exec_path, char **argv);
+static char *make_command_line(char *shell_name, char *exec_path, char **argv);
 
 typedef struct sub_process_t {
 	int sv_stdin[2];
@@ -51,7 +53,7 @@ process_adjust_wait_state(sub_process* pproc)
 	if (i < proc_index) {
 		proc_index--;
 		if (i != proc_index)
-			memmove(&proc_array[i], &proc_array[i+1], 
+			memmove(&proc_array[i], &proc_array[i+1],
 				(proc_index-i) * sizeof(sub_process*));
 		proc_array[proc_index] = NULL;
 	}
@@ -90,7 +92,7 @@ process_wait_for_any_private(void)
 
 	/* return pointer to process */
 	if (retval != WAIT_FAILED) {
-		sub_process* pproc = proc_array[which];	
+		sub_process* pproc = proc_array[which];
 		process_adjust_wait_state(pproc);
 		return pproc;
 	} else
@@ -110,8 +112,8 @@ process_kill(HANDLE proc, int signal)
 
 /*
  * Use this function to register processes you wish to wait for by
- * calling process_file_io(NULL) or process_wait_any(). This must be done 
- * because it is possible for callers of this library to reuse the same 
+ * calling process_file_io(NULL) or process_wait_any(). This must be done
+ * because it is possible for callers of this library to reuse the same
  * handle for multiple processes launches :-(
  */
 void
@@ -126,7 +128,7 @@ process_register(HANDLE proc)
  * you must do 1 of things:
  *
  * 	x = process_easy(...);
- *	
+ *
  * or
  *
  *	x = process_init_fd();
@@ -145,14 +147,14 @@ process_register(HANDLE proc)
 HANDLE
 process_wait_for_any(void)
 {
-	sub_process* pproc = process_wait_for_any_private(); 
+	sub_process* pproc = process_wait_for_any_private();
 
 	if (!pproc)
 		return NULL;
 	else {
-		/* 
-		 * Ouch! can't tell caller if this fails directly. Caller 
-		 * will have to use process_last_err() 
+		/*
+		 * Ouch! can't tell caller if this fails directly. Caller
+		 * will have to use process_last_err()
                  */
 		(void) process_file_io(pproc);
 		return ((HANDLE) pproc);
@@ -237,7 +239,7 @@ process_init()
 	   uses the default security descriptor of the calling process.
 	   Instead we use a security descriptor with no DACL.  This
 	   allows nonrestricted access to the associated objects. */
-	
+
 	if (!InitializeSecurityDescriptor((PSECURITY_DESCRIPTOR)(&sd),
 					  SECURITY_DESCRIPTOR_REVISION)) {
 		pproc->last_err = GetLastError();
@@ -264,11 +266,11 @@ process_init()
 	//
 	// Mark the parent sides of the pipes as non-inheritable
 	//
-	if (SetHandleInformation(stdin_pipes[0], 
+	if (SetHandleInformation(stdin_pipes[0],
 				HANDLE_FLAG_INHERIT, 0) == FALSE ||
-		SetHandleInformation(stdout_pipes[0], 
+		SetHandleInformation(stdout_pipes[0],
 				HANDLE_FLAG_INHERIT, 0) == FALSE ||
-		SetHandleInformation(stderr_pipes[0], 
+		SetHandleInformation(stderr_pipes[0],
 				HANDLE_FLAG_INHERIT, 0) == FALSE) {
 
 		pproc->last_err = GetLastError();
@@ -366,9 +368,9 @@ find_file(char *exec_path, LPOFSTRUCT file_info)
 /*
  * Description:   Create the child process to be helped
  *
- * Returns: 
+ * Returns:
  *
- * Notes/Dependencies:  
+ * Notes/Dependencies:
  */
 long
 process_begin(
@@ -413,10 +415,10 @@ process_begin(
 	}
 	else {
 		/* Attempt to read the first line of the file */
-		if (ReadFile( exec_handle, 
+		if (ReadFile( exec_handle,
 				buf, sizeof(buf) - 1, /* leave room for trailing NULL */
 				&bytes_returned, 0) == FALSE || bytes_returned < 2) {
-	
+
 			pproc->last_err = GetLastError();
 			pproc->lerrno = E_IO;
 			CloseHandle(exec_handle);
@@ -428,7 +430,7 @@ process_begin(
 			 *	exec_path args to shell_name exec_path args
 			 */
 			char *p;
-	
+
 			/*  Make sure buf is NULL terminated */
 			buf[bytes_returned] = 0;
 			/*
@@ -442,7 +444,7 @@ process_begin(
 			p = strchr(buf, '\r');
 			if (p)
 				*p = 0;
-		
+
 			/*
 			 *  Find base name of shell
 			 */
@@ -453,7 +455,7 @@ process_begin(
 				shell_name = &buf[2];/* skipping "#!" */
 			}
 
-		} 
+		}
 		CloseHandle(exec_handle);
 	}
 
@@ -503,18 +505,21 @@ process_begin(
 		if (envblk) free(envblk);
 		return -1;
 	} else {
+		DB (DB_JOBS, ("CreateProcess(%s,%s,...)\n",
+			exec_path ? exec_path : "NULL",
+			command_line ? command_line : "NULL"));
 		if (CreateProcess(
 			exec_path,
 			command_line,
 			NULL,
 			0, /* default security attributes for thread */
 			TRUE, /* inherit handles (e.g. helper pipes, oserv socket) */
-			flags, 
+			flags,
 			envblk,
 			0, /* default starting directory */
 			&startInfo,
 			&procInfo) == FALSE) {
-		
+
 			pproc->last_err = GetLastError();
 			pproc->lerrno = E_FORK;
 			fprintf(stderr, "process_begin: CreateProcess(%s, %s, ...) failed.\n", exec_path, command_line);
@@ -523,23 +528,23 @@ process_begin(
 			return(-1);
 		}
 	}
-	
+
 	pproc->pid = (int)procInfo.hProcess;
 	/* Close the thread handle -- we'll just watch the process */
 	CloseHandle(procInfo.hThread);
-	
+
 	/* Close the halves of the pipes we don't need */
 	if (pproc->sv_stdin) {
 		CloseHandle((HANDLE)pproc->sv_stdin[1]);
-		(HANDLE)pproc->sv_stdin[1] = 0;
+		pproc->sv_stdin[1] = 0;
 	}
 	if (pproc->sv_stdout) {
 		CloseHandle((HANDLE)pproc->sv_stdout[1]);
-		(HANDLE)pproc->sv_stdout[1] = 0;
+		pproc->sv_stdout[1] = 0;
 	}
 	if (pproc->sv_stderr) {
 		CloseHandle((HANDLE)pproc->sv_stderr[1]);
-		(HANDLE)pproc->sv_stderr[1] = 0;
+		pproc->sv_stderr[1] = 0;
 	}
 
 	free( command_line );
@@ -550,7 +555,7 @@ process_begin(
 
 
 
-static DWORD 
+static DWORD
 proc_stdin_thread(sub_process *pproc)
 {
 	DWORD in_done;
@@ -582,7 +587,7 @@ proc_stdout_thread(sub_process *pproc)
 	pproc->outcnt = 0;
 
 	for (;;) {
-		if (ReadFile( (HANDLE)pproc->sv_stdout[0], &c, 1, &nread, NULL) 
+		if (ReadFile( (HANDLE)pproc->sv_stdout[0], &c, 1, &nread, NULL)
 					== FALSE) {
 /*			map_windows32_error_to_string(GetLastError());*/
 			_endthreadex(0);
@@ -590,7 +595,7 @@ proc_stdout_thread(sub_process *pproc)
 		if (nread == 0)
 			_endthreadex(0);
 		if (pproc->outcnt + nread > bufsize) {
-			bufsize += nread + 512; 
+			bufsize += nread + 512;
 			pproc->outp = realloc(pproc->outp, bufsize);
 			if (pproc->outp == NULL) {
 				pproc->outcnt = 0;
@@ -621,7 +626,7 @@ proc_stderr_thread(sub_process *pproc)
 		if (nread == 0)
 			_endthreadex(0);
 		if (pproc->errcnt + nread > bufsize) {
-			bufsize += nread + 512; 
+			bufsize += nread + 512;
 			pproc->errp = realloc(pproc->errp, bufsize);
 			if (pproc->errp == NULL) {
 				pproc->errcnt = 0;
@@ -639,37 +644,37 @@ proc_stderr_thread(sub_process *pproc)
  *
  * Description:
  *
- * Returns: 
+ * Returns:
  *
  * Notes/Dependencies:
  */
 	long
 process_pipe_io(
 	HANDLE proc,
-	char *stdin_data, 
+	char *stdin_data,
 	int stdin_data_len)
 {
 	sub_process *pproc = (sub_process *)proc;
 	bool_t stdin_eof = FALSE, stdout_eof = FALSE, stderr_eof = FALSE;
 	HANDLE childhand = (HANDLE) pproc->pid;
-	HANDLE tStdin, tStdout, tStderr;
+	HANDLE tStdin = NULL, tStdout = NULL, tStderr = NULL;
 	DWORD dwStdin, dwStdout, dwStderr;
 	HANDLE wait_list[4];
 	DWORD wait_count;
 	DWORD wait_return;
 	HANDLE ready_hand;
 	bool_t child_dead = FALSE;
-
+	BOOL GetExitCodeResult;
 
 	/*
 	 *  Create stdin thread, if needed
 	 */
-    pproc->inp = stdin_data;
-    pproc->incnt = stdin_data_len;
+	pproc->inp = stdin_data;
+	pproc->incnt = stdin_data_len;
 	if (!pproc->inp) {
 		stdin_eof = TRUE;
 		CloseHandle((HANDLE)pproc->sv_stdin[0]);
-		(HANDLE)pproc->sv_stdin[0] = 0;
+		pproc->sv_stdin[0] = 0;
 	} else {
 		tStdin = (HANDLE) _beginthreadex( 0, 1024,
 			(unsigned (__stdcall *) (void *))proc_stdin_thread, pproc, 0,
@@ -680,19 +685,19 @@ process_pipe_io(
 			goto done;
 		}
 	}
-	
+
 	/*
 	 *   Assume child will produce stdout and stderr
-	 */ 
+	 */
 	tStdout = (HANDLE) _beginthreadex( 0, 1024,
 		(unsigned (__stdcall *) (void *))proc_stdout_thread, pproc, 0,
 		(unsigned int *) &dwStdout);
 	tStderr = (HANDLE) _beginthreadex( 0, 1024,
 		(unsigned (__stdcall *) (void *))proc_stderr_thread, pproc, 0,
 		(unsigned int *) &dwStderr);
-	
+
 	if (tStdout == 0 || tStderr == 0) {
-	
+
 		pproc->last_err = GetLastError();
 		pproc->lerrno = E_SCALL;
 		goto done;
@@ -717,12 +722,12 @@ process_pipe_io(
 		if (!child_dead) {
 			wait_list[wait_count++] = childhand;
 		}
-		
+
 		wait_return = WaitForMultipleObjects(wait_count, wait_list,
 			 FALSE, /* don't wait for all: one ready will do */
 			 child_dead? 1000 :INFINITE); /* after the child dies, subthreads have
 			 	one second to collect all remaining output */
-		
+
 		if (wait_return == WAIT_FAILED) {
 /*			map_windows32_error_to_string(GetLastError());*/
 			pproc->last_err = GetLastError();
@@ -731,48 +736,49 @@ process_pipe_io(
 		}
 
 		ready_hand = wait_list[wait_return - WAIT_OBJECT_0];
-		
+
 		if (ready_hand == tStdin) {
 			CloseHandle((HANDLE)pproc->sv_stdin[0]);
-			(HANDLE)pproc->sv_stdin[0] = 0;
+			pproc->sv_stdin[0] = 0;
 			CloseHandle(tStdin);
 			tStdin = 0;
 			stdin_eof = TRUE;
-		
+
 		} else if (ready_hand == tStdout) {
-		
+
 		  	CloseHandle((HANDLE)pproc->sv_stdout[0]);
-			(HANDLE)pproc->sv_stdout[0] = 0;
+			pproc->sv_stdout[0] = 0;
 			CloseHandle(tStdout);
 			tStdout = 0;
 		  	stdout_eof = TRUE;
-		
+
 		} else if (ready_hand == tStderr) {
-			
+
 			CloseHandle((HANDLE)pproc->sv_stderr[0]);
-			(HANDLE)pproc->sv_stderr[0] = 0;
+			pproc->sv_stderr[0] = 0;
 			CloseHandle(tStderr);
 			tStderr = 0;
 			stderr_eof = TRUE;
-		
+
 		} else if (ready_hand == childhand) {
-			
-			if (GetExitCodeProcess(childhand, &pproc->exit_code) == FALSE) {
+
+			GetExitCodeResult = GetExitCodeProcess(childhand, (DWORD*)&pproc->exit_code);
+			if (GetExitCodeResult == FALSE) {
 				pproc->last_err = GetLastError();
 				pproc->lerrno = E_SCALL;
 				goto done;
 			}
 			child_dead = TRUE;
-	
+
 		} else {
-		
+
 			/* ?? Got back a handle we didn't query ?? */
 			pproc->last_err = 0;
 			pproc->lerrno = E_FAIL;
 			goto done;
 		}
 	}
- 
+
  done:
 	if (tStdin != 0)
 		CloseHandle(tStdin);
@@ -793,7 +799,7 @@ process_pipe_io(
  *
  * Description:
  *
- * Returns: 
+ * Returns:
  *
  * Notes/Dependencies:
  */
@@ -804,6 +810,7 @@ process_file_io(
 	sub_process *pproc;
 	HANDLE childhand;
 	DWORD wait_return;
+	BOOL GetExitCodeResult;
 
 	if (proc == NULL)
 		pproc = process_wait_for_any_private();
@@ -818,7 +825,7 @@ process_file_io(
 
 	/*
 	 * This function is poorly named, and could also be used just to wait
-	 * for child death if you're doing your own pipe I/O.  If that is 
+	 * for child death if you're doing your own pipe I/O.  If that is
 	 * the case, close the pipe handles here.
 	 */
 	if (pproc->sv_stdin[0]) {
@@ -839,7 +846,7 @@ process_file_io(
 	 */
 
 	wait_return = WaitForSingleObject(childhand, INFINITE);
-		
+
 	if (wait_return != WAIT_OBJECT_0) {
 /*		map_windows32_error_to_string(GetLastError());*/
 		pproc->last_err = GetLastError();
@@ -847,11 +854,12 @@ process_file_io(
 		goto done2;
 	}
 
-	if (GetExitCodeProcess(childhand, &pproc->exit_code) == FALSE) {
+	GetExitCodeResult = GetExitCodeProcess(childhand, (DWORD*)&pproc->exit_code);
+	if (GetExitCodeResult == FALSE) {
 		pproc->last_err = GetLastError();
 		pproc->lerrno = E_SCALL;
 	}
-	
+
 done2:
 	if (pproc->lerrno)
 		return(-1);
@@ -883,188 +891,259 @@ process_cleanup(
 	}
 	if ((HANDLE)pproc->pid)
 		CloseHandle((HANDLE)pproc->pid);
-	
+
 	free(pproc);
 }
 
 
 /*
- * Try to protect against WINDOWS32 argument munging. This function takes
- * an argv vector and outputs a 'protected' string as a return
- * value. The return code can be safely passed to CreateProcess().
- *
- * The caller should free the return value.
- */
-
-#define TRACE(x)
-static char *fix_command_line(char *args[])
-{
-	int i;
-	char *narg;
-	char *nargp;
-	char *p;
-	char *q;
-	int alloc_len = 0;
-
-	for (i = 0; args[i]; i++)
-		alloc_len += ((strlen(args[i]) * 2) + 1);
-	/* account for possible enclosing quotes and null termination */
-	alloc_len += 3;
-
-	nargp = narg = malloc(alloc_len);
-
-	for (i = 0; args[i]; i++) {
-		p = args[i];
-		TRACE(("original arg: %s\n", p));
-
-		if (*p == '\0') {
-			*nargp++ = '"';
-			*nargp++ = '"';
-			*nargp = '\0';
-			TRACE(("empty string arg: %s\n", nargp-2));
-		} else if (strpbrk(p, "\" \t")) {
-			/* point to end of copy buffer */
-			q = narg;
-			q += (alloc_len-1);
-			*q-- = '\0'; /* ensure null terminated string */
-			*q-- = '"';  /* terminating quote of argument */
-
-			/* point to end of the input string */
-			p = args[i];
-			p += strlen(args[i]);
-			p--;
-
-			/* 
-			 * Because arg is quoted, escape any backslashes 
-			 * that might occur at the end of the string which
-			 * proceed the closing quote.
-			 * Example:
-			 * 	foo c:\
-			 * Becomes:
-			 *	"foo c:\\"
-			 */
-			while (*p == '\\')
-				*q-- = *p--, *q-- = '\\';
-
-			/* copy the string in reverse */
-			while (p >= args[i]) {
-				/* copy the character */
-				*q-- = *p--;
-
-				/* 
-				 * Escape any double quote found. Also escape
-				 * each backslash preceding the double quote.
-				 */
-				if (*(p+1) == '"') {
-					*q-- = '\\';
-					if (p >= args[i] && *p == '\\')
-						while (p >= args[i] && *p == '\\')
-							*q-- = *p--, *q-- = '\\';
-				}
-			}
-
-			/* finish quoting arg, q now points to complete arg */
-			*q = '"';
-
-			/* rejustify */
-			memmove(nargp, q, strlen(q) + 1);
-			TRACE(("arg with white space or doublequotes: %s\n", nargp));
-			nargp += strlen(nargp);
-		} else {
-			/* just copy the argument, no protection needed */
-			strcpy(nargp, args[i]);
-			TRACE(("plain arg: %s\n", nargp));
-			nargp += strlen(nargp);
-		}
-
-		/* separate arguments with spaces (if more args to gather) */
-		if (args[i+1])
-			*nargp++ = ' ';
-		*nargp   = '\0';
-	} /* end for */
-
-	/* NULL terminate the arg list */
-	*nargp = '\0';
-
-	return (narg);
-}
-#undef TRACE
-
-/*
- * Description: 
+ * Description:
  *	 Create a command line buffer to pass to CreateProcess
  *
  * Returns:  the buffer or NULL for failure
  *	Shell case:  sh_name a:/full/path/to/script argv[1] argv[2] ...
  *  Otherwise:   argv[0] argv[1] argv[2] ...
  *
- * Notes/Dependencies: 
+ * Notes/Dependencies:
  *   CreateProcess does not take an argv, so this command creates a
- *   command line for the executable.  
+ *   command line for the executable.
  */
 
 static char *
-make_command_line( char *shell_name, char *exec_path, char **argv)
+make_command_line( char *shell_name, char *full_exec_path, char **argv)
 {
-	char** nargv;
-	char*  buf;
-	int    i;
-	char** shargv = NULL;
-	char*  p = NULL;
-	char*  q = NULL;
-	int    j = 0;
- 
-	if (shell_name) {
-		/* handle things like: #!/bin/sh -x */
+	int		argc = 0;
+	char**		argvi;
+	int*		enclose_in_quotes = NULL;
+	int*		enclose_in_quotes_i;
+	unsigned int	bytes_required = 0;
+	char*		command_line;
+	char*		command_line_i;
+	int  cygwin_mode = 0; /* HAVE_CYGWIN_SHELL */
+	int have_sh = 0; /* HAVE_CYGWIN_SHELL */
 
-		/* count tokens */
-		q = strdup(shell_name);
-		for (j = 0, p = q; (p = strtok(p, " \t")) != NULL; p = NULL, j++);
-		free(q);
+#ifdef HAVE_CYGWIN_SHELL
+	have_sh = (shell_name != NULL || strstr(full_exec_path, "sh.exe"));
+	cygwin_mode = 1;
+#endif
 
-		/* copy tokens */
-		q = strdup(shell_name);
-		shargv = (char **) malloc((j+1) * sizeof (char *));
-		for (j = 0, p = q; (p = strtok(p, " \t")) != NULL; p = NULL, j++)
-			shargv[j] = strdup(p);
-		shargv[j] = NULL;
-		free(q);
-
-		/* create argv */
-		for (i = 0; argv[i]; i++);
-		i += (j+1);
-		nargv = (char **) malloc(i * sizeof (char *));
-		for (i = 0; shargv[i] != NULL; i++)
-			nargv[i] = shargv[i];
-		for (j = 0; argv[j]; j++, i++)
-			nargv[i] = argv[j];
-		nargv[i] = NULL;
-	} else
-		nargv = argv;
-
-	/* create string suitable for CreateProcess() */
-	buf = fix_command_line(nargv);
-
-	if (shell_name) {
-		for (j = 0; shargv[j]; j++)
-			free(shargv[j]);
-		free(shargv);
-		free(nargv);
+	if (shell_name && full_exec_path) {
+		bytes_required
+		  = strlen(shell_name) + 1 + strlen(full_exec_path);
+		/*
+		 * Skip argv[0] if any, when shell_name is given.
+		 */
+		if (*argv) argv++;
+		/*
+		 * Add one for the intervening space.
+		 */
+		if (*argv) bytes_required++;
 	}
-	
-	return buf;
+
+	argvi = argv;
+	while (*(argvi++)) argc++;
+
+	if (argc) {
+		enclose_in_quotes = (int*) calloc(1, argc * sizeof(int));
+
+		if (!enclose_in_quotes) {
+			return NULL;
+		}
+	}
+
+	/* We have to make one pass through each argv[i] to see if we need
+	 * to enclose it in ", so we might as well figure out how much
+	 * memory we'll need on the same pass.
+	 */
+
+	argvi = argv;
+	enclose_in_quotes_i = enclose_in_quotes;
+	while(*argvi) {
+		char* p = *argvi;
+		unsigned int backslash_count = 0;
+
+		/*
+		 * We have to enclose empty arguments in ".
+		 */
+		if (!(*p)) *enclose_in_quotes_i = 1;
+
+		while(*p) {
+			switch (*p) {
+			case '\"':
+				/*
+				 * We have to insert a backslash for each "
+				 * and each \ that precedes the ".
+				 */
+				bytes_required += (backslash_count + 1);
+				backslash_count = 0;
+				break;
+
+#if !defined(HAVE_MKS_SHELL) && !defined(HAVE_CYGWIN_SHELL)
+			case '\\':
+				backslash_count++;
+				break;
+#endif
+	/*
+	 * At one time we set *enclose_in_quotes_i for '*' or '?' to suppress
+	 * wildcard expansion in programs linked with MSVC's SETARGV.OBJ so
+	 * that argv in always equals argv out. This was removed.  Say you have
+	 * such a program named glob.exe.  You enter
+	 * glob '*'
+	 * at the sh command prompt.  Obviously the intent is to make glob do the
+	 * wildcarding instead of sh.  If we set *enclose_in_quotes_i for '*' or '?',
+	 * then the command line that glob would see would be
+	 * glob "*"
+	 * and the _setargv in SETARGV.OBJ would _not_ expand the *.
+	 */
+			case ' ':
+			case '\t':
+				*enclose_in_quotes_i = 1;
+				/* fall through */
+
+			default:
+				backslash_count = 0;
+				break;
+			}
+
+			/*
+			 * Add one for each character in argv[i].
+			 */
+			bytes_required++;
+
+			p++;
+		}
+
+		if (*enclose_in_quotes_i) {
+			/*
+			 * Add one for each enclosing ",
+			 * and one for each \ that precedes the
+			 * closing ".
+			 */
+			bytes_required += (backslash_count + 2);
+		}
+
+		/*
+		 * Add one for the intervening space.
+		 */
+		if (*(++argvi)) bytes_required++;
+		enclose_in_quotes_i++;
+	}
+
+	/*
+	 * Add one for the terminating NULL.
+	 */
+	bytes_required++;
+
+	command_line = (char*) malloc(bytes_required);
+
+	if (!command_line) {
+		if (enclose_in_quotes) free(enclose_in_quotes);
+		return NULL;
+	}
+
+	command_line_i = command_line;
+
+	if (shell_name && full_exec_path) {
+		while(*shell_name) {
+			*(command_line_i++) = *(shell_name++);
+		}
+
+		*(command_line_i++) = ' ';
+
+		while(*full_exec_path) {
+			*(command_line_i++) = *(full_exec_path++);
+		}
+
+		if (*argv) {
+			*(command_line_i++) = ' ';
+		}
+	}
+
+	argvi = argv;
+	enclose_in_quotes_i = enclose_in_quotes;
+
+	while(*argvi) {
+		char* p = *argvi;
+		unsigned int backslash_count = 0;
+
+		if (*enclose_in_quotes_i) {
+			*(command_line_i++) = '\"';
+		}
+
+		while(*p) {
+			if (*p == '\"') {
+				if (cygwin_mode && have_sh) { /* HAVE_CYGWIN_SHELL */
+					/* instead of a \", cygwin likes "" */
+					*(command_line_i++) = '\"';
+				} else {
+
+				/*
+				 * We have to insert a backslash for the "
+				 * and each \ that precedes the ".
+				 */
+				backslash_count++;
+
+				while(backslash_count) {
+					*(command_line_i++) = '\\';
+					backslash_count--;
+				};
+				}
+#if !defined(HAVE_MKS_SHELL) && !defined(HAVE_CYGWIN_SHELL)
+			} else if (*p == '\\') {
+				backslash_count++;
+			} else {
+				backslash_count = 0;
+#endif
+			}
+
+			/*
+			 * Copy the character.
+			 */
+			*(command_line_i++) = *(p++);
+		}
+
+		if (*enclose_in_quotes_i) {
+#if !defined(HAVE_MKS_SHELL) && !defined(HAVE_CYGWIN_SHELL)
+			/*
+			 * Add one \ for each \ that precedes the
+			 * closing ".
+			 */
+			while(backslash_count--) {
+				*(command_line_i++) = '\\';
+			};
+#endif
+			*(command_line_i++) = '\"';
+		}
+
+		/*
+		 * Append an intervening space.
+		 */
+		if (*(++argvi)) {
+			*(command_line_i++) = ' ';
+		}
+
+		enclose_in_quotes_i++;
+	}
+
+	/*
+	 * Append the terminating NULL.
+	 */
+	*command_line_i = '\0';
+
+	if (enclose_in_quotes) free(enclose_in_quotes);
+	return command_line;
 }
 
 /*
  * Description: Given an argv and optional envp, launch the process
  *              using the default stdin, stdout, and stderr handles.
  *              Also, register process so that process_wait_for_any_private()
- *		can be used via process_file_io(NULL) or 
+ *		can be used via process_file_io(NULL) or
  *		process_wait_for_any().
  *
- * Returns: 
+ * Returns:
  *
- * Notes/Dependencies:  
+ * Notes/Dependencies:
  */
 HANDLE
 process_easy(
@@ -1117,6 +1196,9 @@ process_easy(
 
   if (process_begin(hProcess, argv, envp, argv[0], NULL)) {
     fake_exits_pending++;
+    /* process_begin() failed: make a note of that.  */
+    if (!((sub_process*) hProcess)->last_err)
+      ((sub_process*) hProcess)->last_err = -1;
     ((sub_process*) hProcess)->exit_code = process_last_err(hProcess);
 
     /* close up unused handles */

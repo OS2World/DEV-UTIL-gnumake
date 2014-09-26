@@ -16,16 +16,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with GNU Make; see the file COPYING.  If not, write to
-# the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+# the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+# Boston, MA 02111-1307, USA.
 
 #
 #	Makefile for GNU Make
 #
 
 # Ultrix 2.2 make doesn't expand the value of VPATH.
-VPATH = /make-3.74/
+VPATH = /make-3.81beta3/
 # This must repeat the value, because configure will remove `VPATH = .'.
-srcdir = /make-3.74/
+srcdir = /make-3.81beta3/
 
 CC = sc
 RM = delete
@@ -124,14 +125,14 @@ CTAGS = ctags -w
 
 objs = commands.o job.o dir.o file.o misc.o main.o read.o remake.o	\
        rule.o implicit.o default.o variable.o expand.o function.o	\
-       vpath.o version.o ar.o arscan.o signame.o remote-$(REMOTE).o     \
-       $(GLOB) $(GETOPT) $(ALLOCA) $(extras)
+       vpath.o version.o ar.o arscan.o signame.o hash.o                 \
+       remote-$(REMOTE).o $(GLOB) $(GETOPT) $(ALLOCA) $(extras)
 srcs = $(srcdir)commands.c $(srcdir)job.c $(srcdir)dir.c             \
        $(srcdir)file.c $(srcdir)getloadavg.c $(srcdir)misc.c         \
        $(srcdir)main.c $(srcdir)read.c $(srcdir)remake.c             \
        $(srcdir)rule.c $(srcdir)implicit.c $(srcdir)default.c        \
        $(srcdir)variable.c $(srcdir)expand.c $(srcdir)function.c     \
-       $(srcdir)vpath.c $(srcdir)version.c                            \
+       $(srcdir)vpath.c $(srcdir)version.c $(srcdir)hash.c           \
        $(srcdir)remote-$(REMOTE).c                                     \
        $(srcdir)ar.c $(srcdir)arscan.c                                \
        $(srcdir)signame.c $(srcdir)signame.h $(GETOPT_SRC)            \
@@ -211,66 +212,154 @@ glob-clean glob-realclean:
 	smake $@
 <
 
-# The automatically generated dependencies below may omit config.h
-# because it is included with ``#include <config.h>'' rather than
-# ``#include "config.h"''.  So we add the explicit dependency to make sure.
-$(objs): config.h
+# --------------- DEPENDENCIES
+#
 
-# Automatically generated dependencies will be put at the end of the file.
+# .deps/alloca.Po
+# dummy
 
-# Automatically generated dependencies.
-commands.o: commands.c make.h dep.h filedef.h variable.h job.h \
- commands.h
+# .deps/ar.Po
+ar.o ar.o: ar.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h dep.h \
 
-job.o: job.c make.h job.h filedef.h commands.h variable.h
+# .deps/arscan.Po
+arscan.o arscan.o: arscan.c make.h config.h \
+  getopt.h \
+  gettext.h \
 
-dir.o: dir.c make.h
+# .deps/commands.Po
+commands.o commands.o: commands.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h filedef.h hash.h variable.h \
+  job.h commands.h
 
-file.o: file.c make.h dep.h filedef.h job.h commands.h variable.h
+# .deps/default.Po
+default.o default.o: default.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h variable.h rule.h \
+  dep.h job.h commands.h
 
-misc.o: misc.c make.h dep.h
+# .deps/dir.Po
+dir.o dir.o: dir.c make.h config.h \
+  getopt.h \
+  gettext.h hash.h \
 
-main.o: main.c make.h dep.h filedef.h variable.h job.h commands.h \
- getopt.h
+# .deps/expand.Po
+expand.o expand.o: expand.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h \
+  job.h commands.h \
+  variable.h rule.h
 
-read.o: read.c make.h dep.h filedef.h job.h commands.h variable.h \
- glob/glob.h
+# .deps/file.Po
+file.o file.o: file.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h filedef.h \
+  hash.h job.h commands.h \
+  variable.h debug.h
 
-remake.o: remake.c make.h filedef.h job.h commands.h dep.h
+# .deps/function.Po
+function.o function.o: function.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h variable.h dep.h \
+  job.h commands.h debug.h
 
-rule.o: rule.c make.h dep.h filedef.h job.h commands.h variable.h \
- rule.h
+# .deps/getloadavg.Po
+# dummy
 
-implicit.o: implicit.c make.h rule.h dep.h filedef.h
+# .deps/getopt.Po
+getopt.o getopt.o: getopt.c config.h \
 
-default.o: default.c make.h rule.h dep.h filedef.h job.h commands.h \
- variable.h
+# .deps/getopt1.Po
+getopt1.o getopt1.o: getopt1.c config.h getopt.h \
 
-variable.o: variable.c make.h dep.h filedef.h job.h commands.h \
- variable.h
+# .deps/hash.Po
+hash.o hash.o: hash.c make.h config.h \
+  getopt.h \
+  gettext.h hash.h
 
-expand.o: expand.c make.h filedef.h job.h commands.h variable.h
+# .deps/implicit.Po
+implicit.o implicit.o: implicit.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h rule.h dep.h debug.h \
+  variable.h job.h \
+  commands.h
 
-function.o: function.c make.h filedef.h variable.h dep.h job.h \
- commands.h amiga.h
+# .deps/job.Po
+job.o job.o: job.c make.h config.h \
+  getopt.h \
+  gettext.h job.h \
+  debug.h filedef.h hash.h \
+  commands.h variable.h \
 
-vpath.o: vpath.c make.h filedef.h variable.h
+# .deps/loadavg-getloadavg.Po
+loadavg-getloadavg.o loadavg-getloadavg.o: getloadavg.c config.h \
+  make.h \
+  getopt.h \
+  gettext.h \
 
-version.o: version.c
+# .deps/main.Po
+main.o main.o: main.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h filedef.h hash.h variable.h \
+  job.h commands.h rule.h \
+  debug.h \
 
-ar.o: ar.c make.h filedef.h dep.h
+# .deps/misc.Po
+misc.o misc.o: misc.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h debug.h
 
-arscan.o: arscan.c make.h
+# .deps/read.Po
+read.o read.o: read.c make.h config.h \
+  getopt.h \
+  gettext.h \
+  dep.h filedef.h hash.h job.h \
+  commands.h variable.h rule.h debug.h \
 
-signame.o: signame.c signame.h
+# .deps/remake.Po
+remake.o remake.o: remake.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h job.h \
+  commands.h dep.h \
+  variable.h debug.h
 
-remote-stub.o: remote-stub.c make.h filedef.h job.h commands.h
+# .deps/remote-cstms.Po
+# dummy
 
-getopt.o: getopt.c
+# .deps/remote-stub.Po
+remote-stub.o remote-stub.o: remote-stub.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h job.h \
+  commands.h
 
-getopt1.o : getopt1.c getopt.h
+# .deps/rule.Po
+rule.o rule.o: rule.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h filedef.h hash.h job.h \
+  commands.h variable.h \
+  rule.h
 
-getloadavg.o: getloadavg.c
+# .deps/signame.Po
+signame.o signame.o: signame.c make.h config.h \
+  getopt.h \
+  gettext.h
 
-amiga.o: amiga.c make.h variable.h amiga.h
+# .deps/variable.Po
+variable.o variable.o: variable.c make.h config.h \
+  getopt.h \
+  gettext.h dep.h filedef.h \
+  hash.h job.h commands.h \
+  variable.h rule.h
 
+# .deps/version.Po
+version.o version.o: version.c config.h
+
+# .deps/vmsjobs.Po
+# dummy
+
+# .deps/vpath.Po
+vpath.o vpath.o: vpath.c make.h config.h \
+  getopt.h \
+  gettext.h filedef.h hash.h variable.h

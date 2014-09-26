@@ -1,0 +1,11 @@
+--- old/make-3.81beta3/signame.c	Fri Apr  8 14:51:20 2005
++++ gnu/make-3.81beta3/signame.c	Tue Jun 28 22:56:58 2005
+@@ -27,7 +27,7 @@
+    Otherwise create our own.
+  */
+ 
+-#if !defined(HAVE_DECL_SYS_SIGLIST)
++#if !HAVE_DECL_SYS_SIGLIST
+ 
+ /* Some systems do not define NSIG in <signal.h>.  */
+ #ifndef	NSIG
